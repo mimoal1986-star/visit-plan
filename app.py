@@ -679,7 +679,7 @@ if st.button("🚀 Рассчитать план", type="primary", use_container
             )
             
             # Инструкция для загрузки в Google Карты
-            st.subheader("Инструкция для Google Карт")
+            st.subheader("Инструкция для Google Карты")
             st.markdown("""
             1. Скачайте файл полигонов в формате GeoJSON
             2. Перейдите на [Google Мои карты](https://www.google.com/maps/d/)
@@ -804,3 +804,38 @@ if st.button("🚀 Рассчитать план", type="primary", use_container
                 b64_excel = base64.b64encode(excel_data).decode()
                 href_excel = f'<a href="data:application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;base64,{b64_excel}" download="план_визитов_квартал{quarter}_{year}.xlsx">📥 Скачать полный отчет (Excel)</a>'
                 st.markdown(href_excel, unsafe_allow_html=True)
+            
+            with col2:
+                # Скачивание GeoJSON
+                geojson_str = json.dumps(polygons_json, ensure_ascii=False, indent=2)
+                b64_geojson = base64.b64encode(geojson_str.encode()).decode()
+                href_geojson = f'<a href="data:application/json;base64,{b64_geojson}" download="полигоны_квартал{quarter}_{year}.geojson">🗺️ Скачать полигоны (GeoJSON)</a>'
+                st.markdown(href_geojson, unsafe_allow_html=True)
+        
+        # Информация о квартале
+        st.markdown("---")
+        st.subheader("📅 Информация о квартале")
+        
+        quarter_start, quarter_end = get_quarter_dates(year, quarter)
+        st.info(f"""
+        **Выбранный квартал:** {quarter} квартал {year} года  
+        **Период:** {quarter_start.strftime('%d.%m.%Y')} - {quarter_end.strftime('%d.%m.%Y')}  
+        **Всего недель в квартале:** {len(get_weeks_in_quarter(year, quarter))}  
+        **Коэффициенты по этапам:** {', '.join([str(c) for c in coefficients])}
+        """)
+        
+    except Exception as e:
+        st.error(f"❌ Произошла ошибка при расчете: {str(e)}")
+        import traceback
+        st.error(f"Детали ошибки:\n{traceback.format_exc()}")
+        st.stop()
+
+# Информация в подвале
+st.markdown("---")
+st.caption("""
+**Примечания:**
+1. Точки распределяются между сотрудниками одного города равномерно
+2. При расчете учитываются только рабочие дни (понедельник-пятница)
+3. Недели, попадающие на границу квартала, рассчитываются пропорционально
+4. Коэффициенты применяются к этапам квартала (каждый этап = 1/4 квартала)
+""")
