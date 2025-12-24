@@ -1414,7 +1414,7 @@ if 'summary_df' in st.session_state and not st.session_state['summary_df'].empty
 
 # ИНФОРМАЦИЯ В ПОДВАЛЕ
 st.markdown("---")
-st.caption(""")
+st.caption("""
 **Версия:** Полная (4/4)  
 **Статус:** Все функции реализованы  
 **Включено:** Шаблоны, расчет плана, фильтры, диаграммы, карты, полигоны, KML выгрузка  
@@ -1423,3 +1423,4 @@ st.caption(""")
 ```bash
 
 pip install plotly folium streamlit-folium simplekml
+
