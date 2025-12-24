@@ -371,8 +371,400 @@ if st.button("🚀 Рассчитать план", type="primary", use_container
                 else:
                     st.info("Данные о посещениях отсутствуют")
         
-        # Здесь будет продолжение расчета...
-        st.info("Расчет будет продолжен в следующей части кода...")
+               # Продолжение расчета...
+        st.markdown("---")
+        st.header("📅 Расчет плана визитов")
+        
+        # Функции для работы с датами
+        def get_quarter_dates(year, quarter):
+            """Возвращает даты начала и конца квартала"""
+            quarter_starts = [date(year, 1, 1), date(year, 4, 1), date(year, 7, 1), date(year, 10, 1)]
+            quarter_start = quarter_starts[quarter - 1]
+            
+            if quarter == 4:
+                quarter_end = date(year + 1, 1, 1) - timedelta(days=1)
+            else:
+                quarter_end = quarter_starts[quarter] - timedelta(days=1)
+            
+            return quarter_start, quarter_end
+        
+        def get_weeks_in_quarter(year, quarter):
+            """Возвращает список недель в квартале с ISO номерами"""
+            quarter_start, quarter_end = get_quarter_dates(year, quarter)
+            
+            weeks = []
+            current_date = quarter_start
+            week_num = 1
+            
+            while current_date <= quarter_end:
+                week_start = current_date
+                week_end = min(current_date + timedelta(days=6), quarter_end)
+                
+                # Получаем ISO номер недели для начала недели
+                iso_week = get_iso_week(week_start)
+                
+                # Считаем рабочие дни в этой неделе для квартала
+                work_days = 0
+                temp_date = week_start
+                while temp_date <= week_end:
+                    if temp_date.weekday() < 5:  # Пн-Пт
+                        work_days += 1
+                    temp_date += timedelta(days=1)
+                
+                weeks.append({
+                    'week_number': week_num,  # Порядковый номер в квартале
+                    'iso_week_number': iso_week,  # ISO номер недели
+                    'start_date': week_start,
+                    'end_date': week_end,
+                    'work_days_in_quarter': work_days,
+                    'is_full_week': work_days == 5
+                })
+                
+                current_date = week_end + timedelta(days=1)
+                week_num += 1
+            
+            return weeks
+        
+        # Функция для проверки соответствия городов
+        def check_city_compatibility(auditors_df, points_df):
+            """Проверяет соответствие городов между файлами аудиторов и точек"""
+            # Если города не указаны в точках, пропускаем проверку
+            if points_df['Город'].isnull().all() or (points_df['Город'] == '').all():
+                return [], set(auditors_df['Город'].unique())
+            
+            auditors_cities = set(auditors_df['Город'].dropna().unique())
+            points_cities = set(points_df['Город'].dropna().unique())
+            
+            warnings = []
+            
+            # Города с аудиторами, но без точек
+            cities_with_auditors_no_points = auditors_cities - points_cities
+            if cities_with_auditors_no_points:
+                warnings.append(f"⚠️ Аудиторы городов {', '.join(cities_with_auditors_no_points)} не имеют точек для посещения")
+            
+            # Города с точками, но без аудиторов
+            cities_with_points_no_auditors = points_cities - auditors_cities
+            if cities_with_points_no_auditors:
+                warnings.append(f"⚠️ В городах {', '.join(cities_with_points_no_auditors)} нет аудиторов для посещения точек")
+            
+            # Города, которые есть в обоих файлах
+            common_cities = auditors_cities & points_cities
+            if common_cities:
+                warnings.append(f"✅ Общие города с аудиторами и точками: {', '.join(common_cities)}")
+            
+            return warnings, common_cities
+        
+        # Проверяем соответствие городов
+        warnings, common_cities = check_city_compatibility(auditors_df, points_df)
+        
+        for warning in warnings:
+            if warning.startswith("⚠️"):
+                st.warning(warning)
+            else:
+                st.success(warning)
+        
+        # Если нет общих городов и города указаны в точках, предупреждаем
+        if not common_cities and not points_df['Город'].isnull().all() and not (points_df['Город'] == '').all():
+            st.warning("⚠️ Нет общих городов между аудиторами и точками. Проверка будет пропущена.")
+        
+        # Обрабатываем фактические посещения
+        def process_actual_visits(visits_df, year, quarter):
+            """Обрабатывает фактические посещения и связывает их с неделями"""
+            if visits_df.empty:
+                return pd.DataFrame()
+            
+            # Оставляем только валидные даты
+            visits_df = visits_df.dropna(subset=['Дата_визита'])
+            
+            if visits_df.empty:
+                return pd.DataFrame()
+            
+            # Получаем границы квартала
+            quarter_start, quarter_end = get_quarter_dates(year, quarter)
+            
+            # Фильтруем посещения по кварталу
+            visits_in_quarter = visits_df[
+                (visits_df['Дата_визита'] >= pd.Timestamp(quarter_start)) &
+                (visits_df['Дата_визита'] <= pd.Timestamp(quarter_end))
+            ].copy()
+            
+            if visits_in_quarter.empty:
+                return pd.DataFrame()
+            
+            # Добавляем ISO номер недели
+            visits_in_quarter['iso_week'] = visits_in_quarter['Дата_визита'].apply(get_iso_week)
+            
+            # Группируем по точкам и неделям (считаем каждую запись как 1 посещение)
+            visits_summary = visits_in_quarter.groupby(['ID_Точки', 'iso_week']).size().reset_index(name='факт_посещений')
+            
+            return visits_summary
+        
+        # Обрабатываем фактические посещения
+        actual_visits_df = process_actual_visits(visits_df, year, quarter)
+        
+        if not actual_visits_df.empty:
+            st.success(f"✅ Загружено {len(actual_visits_df)} записей о фактических посещениях за квартал")
+        else:
+            st.info("ℹ️ Фактические посещения за квартал не найдены или файл пустой")
+        
+        # Функция для расчета плана посещений
+        def calculate_visits_plan(points_df, auditors_df, year, quarter, coefficients, max_visits_per_week):
+            """Основная функция расчета плана посещений"""
+            
+            # Получаем недели квартала
+            weeks = get_weeks_in_quarter(year, quarter)
+            
+            # Создаем структуры для хранения результатов
+            results = []
+            detailed_results = []
+            weekly_assignments = {}
+            city_statistics = []
+            
+            # Собираем статистику по городам
+            if not points_df['Город'].isnull().all() and not (points_df['Город'] == '').all():
+                city_stats = points_df.groupby('Город').agg({
+                    'ID_Точки': 'count',
+                    'Кол-во_посещений': 'sum'
+                }).reset_index()
+                
+                for _, row in city_stats.iterrows():
+                    city_statistics.append({
+                        'Город': row['Город'],
+                        'Всего_точек': row['ID_Точки'],
+                        'План_посещений': row['Кол-во_посещений']
+                    })
+            
+            # Для каждого сотрудника
+            for auditor in auditors_df['ID_Сотрудника'].unique():
+                city = auditors_df[auditors_df['ID_Сотрудника'] == auditor]['Город'].iloc[0]
+                
+                # Получаем точки города сотрудника
+                if not points_df['Город'].isnull().all() and not (points_df['Город'] == '').all():
+                    city_points = points_df[points_df['Город'] == city].copy()
+                else:
+                    # Если город не указан, берем все точки
+                    city_points = points_df.copy()
+                
+                if len(city_points) == 0:
+                    continue
+                
+                # Распределяем точки между аудиторами города
+                city_auditors = auditors_df[auditors_df['Город'] == city]['ID_Сотрудника'].tolist()
+                auditor_index = city_auditors.index(auditor)
+                
+                # Простое распределение по порядку
+                points_per_auditor = len(city_points) // len(city_auditors)
+                remainder = len(city_points) % len(city_auditors)
+                
+                start_idx = sum([points_per_auditor + (1 if i < remainder else 0) 
+                                for i in range(auditor_index)])
+                end_idx = start_idx + points_per_auditor + (1 if auditor_index < remainder else 0)
+                
+                auditor_points = city_points.iloc[start_idx:end_idx].copy()
+                
+                if len(auditor_points) == 0:
+                    continue
+                
+                # Создаем список всех посещений для аудитора
+                all_visits_list = []
+                for _, point in auditor_points.iterrows():
+                    visits_count = point.get('Кол-во_посещений', 1)
+                    for _ in range(visits_count):
+                        all_visits_list.append(point.to_dict())
+                
+                total_visits_actual = len(all_visits_list)
+                weeks_count = len(weeks)
+                
+                # Распределяем посещения по неделям
+                visit_idx = 0
+                
+                for week in weeks:
+                    week_visits_count = 0
+                    week_visits_list = []
+                    
+                    # Определяем коэффициент для недели
+                    iso_week = week['iso_week_number']
+                    work_days = week['work_days_in_quarter']
+                    
+                    # Определяем этап (1-4)
+                    stage_idx = min(3, (week['week_number'] - 1) // (weeks_count // 4))
+                    
+                    # Базовое количество посещений для недели
+                    base_visits = total_visits_actual / weeks_count
+                    
+                    # Применяем коэффициенты
+                    adjusted_visits = base_visits * coefficients[stage_idx]
+                    
+                    # Корректируем на рабочие дни
+                    if work_days > 0:
+                        week_target = int(adjusted_visits * (work_days / 5))
+                    else:
+                        week_target = 0
+                    
+                    # Ограничиваем максимумом
+                    week_target = min(week_target, max_visits_per_week)
+                    
+                    # Убедимся, что week_target хотя бы 1, если есть посещения
+                    if week_target == 0 and total_visits_actual > 0 and work_days > 0:
+                        week_target = 1
+                    
+                    # Берем посещения для этой недели
+                    while week_visits_count < week_target and visit_idx < total_visits_actual:
+                        week_visits_list.append(all_visits_list[visit_idx])
+                        week_visits_count += 1
+                        visit_idx += 1
+                    
+                    if week_visits_count > 0:
+                        # Сохраняем результаты
+                        results.append({
+                            'Сотрудник': auditor,
+                            'Город': city,
+                            'ISO_Неделя': iso_week,
+                            'Начало_недели': week['start_date'].strftime('%d.%m.%Y'),
+                            'Конец_недели': week['end_date'].strftime('%d.%m.%Y'),
+                            'Рабочих_дней': work_days,
+                            'План_посещений': week_visits_count,
+                            'Этап': stage_idx + 1,
+                            'Коэффициент': coefficients[stage_idx]
+                        })
+                        
+                        # Детализация по посещениям
+                        for visit in week_visits_list:
+                            detailed_results.append({
+                                'Сотрудник': auditor,
+                                'Город': city,
+                                'ISO_Неделя': iso_week,
+                                'ID_Точки': visit.get('ID_Точки', ''),
+                                'Название_Точки': visit.get('Название_Точки', ''),
+                                'Адрес': visit.get('Адрес', ''),
+                                'Тип_точки': visit.get('Тип', ''),
+                                'Широта': visit.get('Широта', ''),
+                                'Долгота': visit.get('Долгота', ''),
+                                'Кол-во_посещений_план': visit.get('Кол-во_посещений', 1)
+                            })
+                        
+                        # Сохраняем для группировки
+                        if auditor not in weekly_assignments:
+                            weekly_assignments[auditor] = {}
+                        
+                        weekly_assignments[auditor][iso_week] = week_visits_list
+            
+            # Создаем DataFrame результатов
+            summary_df = pd.DataFrame(results) if results else pd.DataFrame()
+            details_df = pd.DataFrame(detailed_results) if detailed_results else pd.DataFrame()
+            city_stats_df = pd.DataFrame(city_statistics) if city_statistics else pd.DataFrame()
+            
+            return summary_df, details_df, weekly_assignments, city_stats_df
+        
+        # Выполняем расчет плана
+        with st.spinner("🔄 Идет расчет плана..."):
+            summary_df, details_df, weekly_assignments, city_stats_df = calculate_visits_plan(
+                points_df, auditors_df, year, quarter, coefficients, max_visits_per_week
+            )
+        
+        if summary_df.empty:
+            st.error("❌ Не удалось рассчитать план. Проверьте данные.")
+            st.stop()
+        
+        st.success(f"✅ План рассчитан! Охвачено {len(summary_df['Сотрудник'].unique())} сотрудников")
+        
+        # Объединяем план с фактом
+        def merge_plan_with_fact(summary_df, details_df, actual_visits_df):
+            """Объединяет плановые данные с фактическими"""
+            
+            # Для сводной таблицы
+            if not summary_df.empty:
+                summary_with_fact = summary_df.copy()
+                
+                # Если есть фактические данные, добавляем
+                if not actual_visits_df.empty:
+                    # Для каждой строки плана ищем факт по сотруднику и неделе
+                    summary_with_fact['Факт_посещений'] = 0
+                    # Здесь будет логика сопоставления
+                else:
+                    summary_with_fact['Факт_посещений'] = 0
+                
+                summary_with_fact['%_выполнения'] = summary_with_fact.apply(
+                    lambda x: round((x['Факт_посещений'] / x['План_посещений'] * 100) if x['План_посещений'] > 0 else 0, 1),
+                    axis=1
+                )
+            
+            # Для детальной таблицы
+            if not details_df.empty and not actual_visits_df.empty:
+                details_with_fact = details_df.copy()
+                # Здесь будет логика сопоставления
+            else:
+                details_with_fact = details_df.copy() if not details_df.empty else pd.DataFrame()
+            
+            return summary_with_fact, details_with_fact
+        
+        # Объединяем план с фактом
+        summary_with_fact, details_with_fact = merge_plan_with_fact(summary_df, details_df, actual_visits_df)
+        
+        # Сохраняем данные в session state для использования в других частях
+        st.session_state['points_df'] = points_df
+        st.session_state['auditors_df'] = auditors_df
+        st.session_state['summary_df'] = summary_with_fact
+        st.session_state['details_df'] = details_with_fact
+        st.session_state['city_stats_df'] = city_stats_df
+        st.session_state['weekly_assignments'] = weekly_assignments
+        st.session_state['actual_visits_df'] = actual_visits_df
+        st.session_state['year'] = year
+        st.session_state['quarter'] = quarter
+        st.session_state['coefficients'] = coefficients
+        
+        # Показываем первую вкладку результатов
+        st.markdown("---")
+        st.header("📊 Результаты расчета")
+        
+        # Вкладка 1: Статистика городов
+        st.subheader("📊 Статистика по городам")
+        
+        if not city_stats_df.empty:
+            # Общая статистика
+            total_points = len(points_df)
+            total_plan_visits = points_df['Кол-во_посещений'].sum()
+            total_auditors = len(auditors_df)
+            
+            # Рассчитываем факт из actual_visits_df
+            if not actual_visits_df.empty:
+                total_fact_visits = actual_visits_df['факт_посещений'].sum()
+                completion_percent = round((total_fact_visits / total_plan_visits * 100) if total_plan_visits > 0 else 0, 1)
+            else:
+                total_fact_visits = 0
+                completion_percent = 0
+            
+            col1, col2, col3, col4 = st.columns(4)
+            with col1:
+                st.metric("Всего городов", len(city_stats_df))
+            with col2:
+                st.metric("План посещений", total_plan_visits)
+            with col3:
+                st.metric("Факт посещений", total_fact_visits)
+            with col4:
+                st.metric("% выполнения", f"{completion_percent}%")
+            
+            # Добавляем факт в таблицу статистики городов
+            city_stats_display = city_stats_df.copy()
+            city_stats_display['Факт_посещений'] = 0  # Заглушка - будет рассчитано в след. части
+            city_stats_display['%_выполнения'] = 0
+            
+            # Переименовываем колонки
+            city_stats_display = city_stats_display.rename(columns={
+                'Всего_точек': 'Всего точек',
+                'План_посещений': 'План посещений'
+            })
+            
+            # Порядок колонок
+            city_stats_display = city_stats_display[['Город', 'Всего точек', 'План посещений', 'Факт_посещений', '%_выполнения']]
+            
+            st.dataframe(
+                city_stats_display,
+                use_container_width=True,
+                hide_index=True
+            )
+        else:
+            st.info("Нет данных по городам для отображения статистики")
         
     except Exception as e:
         st.error(f"❌ Произошла ошибка при обработке данных: {str(e)}")
@@ -382,6 +774,8 @@ if st.button("🚀 Рассчитать план", type="primary", use_container
 # Информация в подвале
 st.markdown("---")
 st.caption("""
+
+
 **Примечания:**
 1. Для продолжения расчетов загрузите файл и нажмите "Рассчитать"
 2. В следующей части кода будут реализованы: расчет плана, полигоны, KML выгрузка
