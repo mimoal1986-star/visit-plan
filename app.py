@@ -123,12 +123,14 @@ def get_download_link(df, filename, text):
     """Генерирует ссылку для скачивания DataFrame"""
     towrite = io.BytesIO()
     if filename.endswith('.xlsx'):
-        df.to_excel(towrite, index=False, encoding='utf-8')
+        # Исправлено: убран параметр encoding, которого нет в to_excel()
+        df.to_excel(towrite, index=False)
         mime_type = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
     elif filename.endswith('.json'):
         towrite.write(json.dumps(df, ensure_ascii=False, indent=2).encode('utf-8'))
         mime_type = 'application/json'
     else:
+        # Для CSV оставляем encoding
         df.to_csv(towrite, index=False, encoding='utf-8')
         mime_type = 'text/csv'
     
