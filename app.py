@@ -770,6 +770,382 @@ if st.button("🚀 Рассчитать план", type="primary", use_container
         st.error(f"❌ Произошла ошибка при обработке данных: {str(e)}")
         import traceback
         st.error(f"Детали ошибки:\n{traceback.format_exc()}")
+        # Создаем вкладки для разных видов отчетов
+        tab1, tab2, tab3, tab4, tab5 = st.tabs([
+            "📅 Сводный план", 
+            "📍 Распределение посещений", 
+            "📈 Статистика по типам",
+            "🗺️ Карта полигонов",
+            "📥 Выгрузка"
+        ])
+        
+        with tab1:
+            st.subheader("📅 Сводный план по неделям")
+            
+            if not summary_with_fact.empty:
+                # Фильтры
+                col1, col2, col3 = st.columns(3)
+                with col1:
+                    # Фильтр по ISO неделям
+                    available_weeks = sorted(summary_with_fact['ISO_Неделя'].unique())
+                    selected_week = st.selectbox(
+                        "Выберите неделю (ISO)",
+                        available_weeks,
+                        key="week_filter_main"
+                    )
+                
+                with col2:
+                    # Фильтр по городу
+                    available_cities = ['Все'] + sorted(summary_with_fact['Город'].dropna().unique().tolist())
+                    selected_city = st.selectbox(
+                        "Выберите город",
+                        available_cities,
+                        key="city_filter_main"
+                    )
+                
+                with col3:
+                    # Фильтр по полигону (пока заглушка - будет в след. части)
+                    available_polygons = ['Все']
+                    selected_polygon = st.selectbox(
+                        "Выберите полигон",
+                        available_polygons,
+                        key="polygon_filter_main",
+                        disabled=True  # Пока не реализовано
+                    )
+                
+                # Применяем фильтры
+                filtered_data = summary_with_fact.copy()
+                
+                if selected_week:
+                    filtered_data = filtered_data[filtered_data['ISO_Неделя'] == selected_week]
+                
+                if selected_city != 'Все':
+                    filtered_data = filtered_data[filtered_data['Город'] == selected_city]
+                
+                # Формируем таблицу для отображения
+                display_df = filtered_data[['Сотрудник', 'Город', 'План_посещений', 'Факт_посещений', '%_выполнения']].copy()
+                display_df.columns = ['Сотрудник', 'Город', 'План посещений', 'Факт посещений', '% выполнения']
+                
+                # Сортируем по сотруднику
+                display_df = display_df.sort_values('Сотрудник')
+                
+                if not display_df.empty:
+                    st.dataframe(
+                        display_df,
+                        use_container_width=True,
+                        hide_index=True
+                    )
+                    
+                    # Итоги по неделе
+                    col1, col2, col3 = st.columns(3)
+                    with col1:
+                        st.metric("Всего сотрудников", len(display_df))
+                    with col2:
+                        total_plan = display_df['План посещений'].sum()
+                        total_fact = display_df['Факт посещений'].sum()
+                        st.metric("План посещений", total_plan)
+                    with col3:
+                        st.metric("Факт посещений", total_fact)
+                    
+                    # Диаграмма выполнения плана
+                    try:
+                        import plotly.graph_objects as go
+                        
+                        # Готовим данные для диаграммы
+                        employees = display_df['Сотрудник'].tolist()
+                        plan_values = display_df['План посещений'].tolist()
+                        fact_values = display_df['Факт посещений'].tolist()
+                        completion = display_df['% выполнения'].tolist()
+                        
+                        # Создаем диаграмму
+                        fig = go.Figure()
+                        
+                        # Столбцы плана
+                        fig.add_trace(go.Bar(
+                            name='План',
+                            x=employees,
+                            y=plan_values,
+                            marker_color='lightblue',
+                            text=plan_values,
+                            textposition='outside'
+                        ))
+                        
+                        # Столбцы факта (накладываем на план)
+                        fig.add_trace(go.Bar(
+                            name='Факт',
+                            x=employees,
+                            y=fact_values,
+                            marker_color='orange',
+                            text=fact_values,
+                            textposition='outside'
+                        ))
+                        
+                        # Настройки диаграммы
+                        fig.update_layout(
+                            title=f'Выполнение плана на неделю {selected_week}',
+                            barmode='overlay',
+                            xaxis_title='Сотрудник',
+                            yaxis_title='Количество посещений',
+                            showlegend=True,
+                            height=400
+                        )
+                        
+                        st.plotly_chart(fig, use_container_width=True)
+                        
+                    except ImportError:
+                        st.warning("Для отображения диаграмм установите библиотеку plotly")
+                        st.info("Запустите: pip install plotly")
+                else:
+                    st.info(f"Нет данных для недели {selected_week} с выбранными фильтрами")
+            else:
+                st.info("Нет данных для отображения сводного плана")
+        
+        with tab2:
+            st.subheader("📍 Распределение посещений по неделям и сотрудникам")
+            
+            if not details_with_fact.empty:
+                # Фильтры
+                col1, col2 = st.columns(2)
+                with col1:
+                    # Выбор сотрудника
+                    employees = sorted(details_with_fact['Сотрудник'].unique())
+                    selected_employee = st.selectbox(
+                        "Выберите сотрудника",
+                        employees,
+                        key="employee_filter_detail"
+                    )
+                
+                with col2:
+                    # Фильтр по городу
+                    available_cities = ['Все'] + sorted(details_with_fact['Город'].dropna().unique().tolist())
+                    selected_city_detail = st.selectbox(
+                        "Выберите город",
+                        available_cities,
+                        key="city_filter_detail"
+                    )
+                
+                # Применяем фильтры
+                employee_data = details_with_fact[details_with_fact['Сотрудник'] == selected_employee].copy()
+                
+                if selected_city_detail != 'Все':
+                    employee_data = employee_data[employee_data['Город'] == selected_city_detail]
+                
+                if not employee_data.empty:
+                    # Сводная по неделям для выбранного сотрудника
+                    weeks_summary = employee_data.groupby('ISO_Неделя').agg({
+                        'ID_Точки': 'count',
+                        'Тип_точки': lambda x: ', '.join([f"{val}:{list(x).count(val)}" for val in x.unique()])
+                    }).reset_index()
+                    
+                    weeks_summary.columns = ['ISO Неделя', 'План посещений', 'Распределение по типам']
+                    
+                    st.dataframe(
+                        weeks_summary,
+                        use_container_width=True,
+                        hide_index=True
+                    )
+                    
+                    # Детализация для выбранной недели
+                    st.subheader(f"Детализация посещений для {selected_employee}")
+                    
+                    available_weeks_detail = sorted(employee_data['ISO_Неделя'].unique())
+                    selected_week_detail = st.selectbox(
+                        "Выберите неделю для детализации",
+                        available_weeks_detail,
+                        key="week_detail_filter"
+                    )
+                    
+                    week_details = employee_data[employee_data['ISO_Неделя'] == selected_week_detail]
+                    
+                    if not week_details.empty:
+                        # Статистика по типам
+                        type_counts = week_details['Тип_точки'].value_counts()
+                        
+                        cols = st.columns(len(type_counts) + 1)
+                        for idx, (type_name, count) in enumerate(type_counts.items()):
+                            with cols[idx]:
+                                st.metric(type_name, count)
+                        
+                        with cols[-1]:
+                            st.metric("Всего", len(week_details))
+                        
+                        # Таблица с точками
+                        display_details = week_details[['ID_Точки', 'Название_Точки', 'Адрес', 'Тип_точки']].copy()
+                        
+                        # Добавляем чекбоксы для отметки посещений
+                        if 'checkboxes' not in st.session_state:
+                            st.session_state.checkboxes = {}
+                        
+                        # Создаем колонку с чекбоксами
+                        display_details['Визит совершен'] = False
+                        
+                        # Отображаем таблицу с возможностью редактирования
+                        edited_df = st.data_editor(
+                            display_details,
+                            column_config={
+                                "Визит совершен": st.column_config.CheckboxColumn(
+                                    "Визит совершен",
+                                    help="Отметьте, если визит был совершен",
+                                    default=False,
+                                )
+                            },
+                            disabled=["ID_Точки", "Название_Точки", "Адрес", "Тип_точки"],
+                            hide_index=True,
+                            use_container_width=True
+                        )
+                        
+                        # Кнопка для сохранения изменений
+                        if st.button("💾 Сохранить отметки о посещениях", key="save_visits"):
+                            # Здесь будет логика сохранения в файл
+                            st.success("Отметки сохранены (функция будет реализована в след. части)")
+                    else:
+                        st.info(f"На неделю {selected_week_detail} нет запланированных посещений")
+                else:
+                    st.info(f"Нет данных для сотрудника {selected_employee}")
+            else:
+                st.info("Нет данных для отображения распределения посещений")
+        
+        with tab3:
+            st.subheader("📈 Статистика по типам точек")
+            
+            if not points_df.empty:
+                # Группируем данные по типам точек
+                type_stats = points_df.groupby('Тип').agg({
+                    'ID_Точки': 'count',
+                    'Кол-во_посещений': 'sum'
+                }).reset_index()
+                
+                type_stats.columns = ['Тип точки', 'Количество точек', 'План посещений']
+                
+                # Добавляем фактические данные (если есть)
+                if not actual_visits_df.empty and not details_with_fact.empty:
+                    # Сопоставляем фактические посещения по типам точек
+                    # Это упрощенная логика - в реальности нужно сопоставлять ID точек
+                    type_stats['Факт посещений'] = 0  # Заглушка
+                else:
+                    type_stats['Факт посещений'] = 0
+                
+                # Рассчитываем процент выполнения
+                type_stats['% выполнения'] = type_stats.apply(
+                    lambda x: round((x['Факт посещений'] / x['План посещений'] * 100) if x['План посещений'] > 0 else 0, 1),
+                    axis=1
+                )
+                
+                # Упорядочиваем колонки
+                type_stats = type_stats[['Тип точки', 'Количество точек', 'План посещений', 'Факт посещений', '% выполнения']]
+                
+                st.dataframe(
+                    type_stats,
+                    use_container_width=True,
+                    hide_index=True
+                )
+                
+                # Диаграмма плана посещений по типам точек
+                try:
+                    import plotly.graph_objects as go
+                    
+                    fig = go.Figure()
+                    
+                    # Гистограмма плана
+                    fig.add_trace(go.Bar(
+                        name='План посещений',
+                        x=type_stats['Тип точки'],
+                        y=type_stats['План посещений'],
+                        marker_color='lightblue',
+                        text=type_stats['План посещений'],
+                        textposition='outside'
+                    ))
+                    
+                    # Если есть факт, добавляем вторую гистограмму
+                    if type_stats['Факт посещений'].sum() > 0:
+                        fig.add_trace(go.Bar(
+                            name='Факт посещений',
+                            x=type_stats['Тип точки'],
+                            y=type_stats['Факт посещений'],
+                            marker_color='orange',
+                            text=type_stats['Факт посещений'],
+                            textposition='outside'
+                        ))
+                    
+                    fig.update_layout(
+                        title='Распределение посещений по типам точек',
+                        barmode='group',
+                        xaxis_title='Тип точки',
+                        yaxis_title='Количество посещений',
+                        showlegend=True,
+                        height=400
+                    )
+                    
+                    st.plotly_chart(fig, use_container_width=True)
+                    
+                except ImportError:
+                    st.warning("Для отображения диаграмм установите библиотеку plotly")
+            
+            else:
+                st.info("Нет данных для статистики по типам точек")
+        
+        with tab4:
+            st.subheader("🗺️ Карта полигонов")
+            
+            st.info("🚧 Функционал карты будет реализован в следующей части")
+            st.info("""
+            **Планируется:**
+            1. Отображение полигонов на карте
+            2. Точки внутри полигонов
+            3. Цветовая синхронизация
+            4. Кнопка выгрузки KML
+            """)
+            
+            # Заглушка для будущей карты
+            col1, col2 = st.columns(2)
+            with col1:
+                if st.button("🔄 Обновить карту", disabled=True):
+                    st.info("Функция в разработке")
+            
+            with col2:
+                if st.button("🗺️ Выгрузить KML", disabled=True):
+                    st.info("Функция в разработке")
+        
+        with tab5:
+            st.subheader("📥 Выгрузка результатов")
+            
+            st.info("🚧 Функционал выгрузки будет реализован в следующей части")
+            st.info("""
+            **Будут доступны для выгрузки:**
+            1. Полный отчет в Excel
+            2. KML файл с полигонами и точками
+            3. Отчет по выполнению плана
+            """)
+            
+            # Заглушки для кнопок выгрузки
+            col1, col2, col3 = st.columns(3)
+            
+            with col1:
+                if st.button("📊 Выгрузить Excel отчет", disabled=True):
+                    st.info("Функция в разработке")
+            
+            with col2:
+                if st.button("🗺️ Выгрузить KML", disabled=True):
+                    st.info("Функция в разработке")
+            
+            with col3:
+                if st.button("📈 Выгрузить статистику", disabled=True):
+                    st.info("Функция в разработке")
+        
+        # Информация о квартале
+        st.markdown("---")
+        st.subheader("📅 Информация о квартале")
+        
+        quarter_start, quarter_end = get_quarter_dates(year, quarter)
+        total_weeks = len(get_weeks_in_quarter(year, quarter))
+        
+        st.info(f"""
+        **Выбранный квартал:** {quarter} квартал {year} года  
+        **Период:** {quarter_start.strftime('%d.%m.%Y')} - {quarter_end.strftime('%d.%m.%Y')}  
+        **Всего недель в квартале:** {total_weeks}  
+        **Коэффициенты по этапам:** {', '.join([str(c) for c in coefficients])}
+        **Максимум посещений в неделю:** {max_visits_per_week}
+        """)
 
 # Информация в подвале
 st.markdown("---")
