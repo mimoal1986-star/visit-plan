@@ -518,9 +518,18 @@ def distribute_visits_by_weeks(points_assignment_df, points_df, year, quarter, c
         # Получаем недели в квартале
         weeks = get_weeks_in_quarter(year, quarter)
         
-        # Определяем этапы (4 этапа в квартале)
+        # ИСПРАВЛЕНИЕ: более надежное определение этапов
         total_weeks = len(weeks)
-        stage_size = max(total_weeks // 4, 1)  # Исправлено: предотвращаем деление на 0
+        
+        if total_weeks <= 0:
+            return pd.DataFrame()
+            
+        # Определяем размер этапа
+        if total_weeks >= 4:
+            stage_size = total_weeks // 4
+        else:
+            # Для коротких кварталов (1-3 недели)
+            stage_size = 1
         
         # Распределяем точки
         for _, assignment in points_assignment_df.iterrows():
@@ -535,7 +544,12 @@ def distribute_visits_by_weeks(points_assignment_df, points_df, year, quarter, c
             # Распределяем посещения по неделям с учетом коэффициентов
             for week_idx, week in enumerate(weeks):
                 # Определяем этап для расчета коэффициента
-                stage_idx = min(week_idx // stage_size, 3) if stage_size > 0 else 0
+                # ИСПРАВЛЕНИЕ: безопасное определение этапа
+                if stage_size > 0:
+                    stage_idx = min(week_idx // stage_size, 3)
+                else:
+                    stage_idx = 0
+                    
                 stage_coefficient = coefficients[stage_idx] if stage_idx < len(coefficients) else 1.0
                 
                 detailed_plan.append({
@@ -1292,6 +1306,7 @@ elif st.session_state.get('data_loaded', False):
 
 st.markdown("---")
 st.caption("📋 **Часть 2/5:** Функции обработки данных, генерация полигонов, распределение посещений по неделям")
+
 
 
 
