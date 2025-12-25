@@ -83,29 +83,31 @@ with st.sidebar:
     # Выбор квартала и года
     col1, col2 = st.columns(2)
     with col1:
-        quarter = st.selectbox("Квартал", [1, 2, 3, 4], index=0)
+        quarter = st.selectbox("Квартал", [1, 2, 3, 4], index=0, key="sidebar_quarter")
     with col2:
-        year = st.selectbox("Год", list(range(2023, 2027)), index=2)
+        year = st.selectbox("Год", list(range(2023, 2027)), index=2, key="sidebar_year")
     
     # Коэффициенты этапов
     st.subheader("Коэффициенты нагрузки по этапам")
     st.caption("Квартал делится на 4 этапа")
     
-    stage1 = st.number_input("Этап 1 коэффициент", value=0.8, min_value=0.1, max_value=2.0, step=0.1)
-    stage2 = st.number_input("Этап 2 коэффициент", value=1.0, min_value=0.1, max_value=2.0, step=0.1)
-    stage3 = st.number_input("Этап 3 коэффициент", value=1.2, min_value=0.1, max_value=2.0, step=0.1)
-    stage4 = st.number_input("Этап 4 коэффициент", value=0.9, min_value=0.1, max_value=2.0, step=0.1)
+    stage1 = st.number_input("Этап 1 коэффициент", value=0.8, min_value=0.1, max_value=2.0, step=0.1, key="sidebar_stage1")
+    stage2 = st.number_input("Этап 2 коэффициент", value=1.0, min_value=0.1, max_value=2.0, step=0.1, key="sidebar_stage2")
+    stage3 = st.number_input("Этап 3 коэффициент", value=1.2, min_value=0.1, max_value=2.0, step=0.1, key="sidebar_stage3")
+    stage4 = st.number_input("Этап 4 коэффициент", value=0.9, min_value=0.1, max_value=2.0, step=0.1, key="sidebar_stage4")
     
     coefficients = [stage1, stage2, stage3, stage4]
     
     st.markdown("---")
     
     st.info("""
-    **!Инструкция:**
+    **Инструкция:**
     1. Загрузите файл с данными (1 файл, 3 вкладки)
     2. Настройте квартал и коэффициенты
     3. Нажмите кнопку "Рассчитать план"
     4. Используйте вкладки для анализа
+    
+    *Настройки сохраняются автоматически*
     """)
 
 # ==============================================
@@ -1723,6 +1725,7 @@ if st.session_state.plan_calculated:
             
         except Exception as e:
             st.error(f"❌ Ошибка при создании полного отчета: {str(e)}")
+
 
 
 
