@@ -873,17 +873,18 @@ def process_actual_visits(visits_df, points_df, year, quarter):
     
     quarter_start, quarter_end = get_quarter_dates(year, quarter)
 
-# ИСПРАВЛЕНИЕ: Преобразуем date в datetime для сравнения с pd.Timestamp
-from datetime import datetime as dt_datetime  # Импортируем с другим именем чтобы избежать конфликта
-
-quarter_start_dt = pd.Timestamp(dt_datetime.combine(quarter_start, dt_datetime.min.time()))
-quarter_end_dt = pd.Timestamp(dt_datetime.combine(quarter_end, dt_datetime.max.time()))
-
-# Фильтруем посещения по кварталу
-visits_in_quarter = visits_df[
-    (visits_df['Дата_визита'] >= quarter_start_dt) &
-    (visits_df['Дата_визита'] <= quarter_end_dt)
-].copy()
+    # ИСПРАВЛЕНИЕ: Преобразуем date в datetime для сравнения с pd.Timestamp
+    from datetime import datetime as dt_datetime  # Импортируем с другим именем чтобы избежать конфликта
+    
+    quarter_start_dt = pd.Timestamp(dt_datetime.combine(quarter_start, dt_datetime.min.time()))
+    quarter_end_dt = pd.Timestamp(dt_datetime.combine(quarter_end, dt_datetime.max.time()))
+    
+    # Фильтруем посещения по кварталу
+    visits_in_quarter = visits_df[
+        (visits_df['Дата_визита'] >= quarter_start_dt) &
+        (visits_df['Дата_визита'] <= quarter_end_dt)
+    ].copy()
+    
     if visits_in_quarter.empty:
         return pd.DataFrame(columns=['ID_Точки', 'Дата_визита', 'ID_Сотрудника', 'ISO_Неделя'])
     
@@ -899,7 +900,7 @@ visits_in_quarter = visits_df[
     
     visits_in_quarter = visits_in_quarter[visits_in_quarter['ID_Точки'].isin(valid_point_ids)]
     
-        return visits_in_quarter.reset_index(drop=True)
+    return visits_in_quarter.reset_index(drop=True)
 
 # ==============================================
 # РАСЧЕТ СТАТИСТИКИ
@@ -1841,4 +1842,5 @@ st.caption(
     """
 
 )
+
 
