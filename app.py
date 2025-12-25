@@ -152,119 +152,144 @@ def get_download_link(data, filename, text, mime_type='application/vnd.openxmlfo
 
 st.header("📤 Загрузка файлов")
 
-# Используем st.tabs для создания трех вкладок
 upload_tab1, upload_tab2, upload_tab3 = st.tabs([
     "📁 Загрузка файлов", 
-    "📥 Скачать шаблоны", 
+    "📥 Скачать шаблон", 
     "📋 Описание полей"
 ])
 
 with upload_tab1:
-    st.subheader("Загрузите файлы с данными")
+    st.subheader("Загрузите файл с данными")
     
-    col1, col2, col3 = st.columns(3)
+    st.info("""
+    **📝 Формат файла:** 
+    - Один файл Excel с тремя вкладками: "Точки", "Аудиторы", "Факт_посещений"
+    - Скачайте шаблон справа, заполните данные и загрузите обратно
+    """)
     
-    with col1:
-        st.markdown("#### Файл Точки")
-        points_file = st.file_uploader(
-            "Файл с точками (Excel)", 
-            type=['xlsx', 'xls'], 
-            key="points_uploader",
-            help="Файл с информацией о торговых точках"
-        )
-        if points_file:
-            st.success(f"✅ Загружен: {points_file.name}")
+    # Один загрузчик для всего файла
+    data_file = st.file_uploader(
+        "Файл с данными (Excel)", 
+        type=['xlsx', 'xls'], 
+        key="data_uploader",
+        help="Excel файл с тремя вкладками: Точки, Аудиторы, Факт_посещений"
+    )
     
-    with col2:
-        st.markdown("#### Файл Аудиторы")
-        auditors_file = st.file_uploader(
-            "Файл с аудиторами (Excel)", 
-            type=['xlsx', 'xls'], 
-            key="auditors_uploader",
-            help="Файл с информацией об аудиторах"
-        )
-        if auditors_file:
-            st.success(f"✅ Загружен: {auditors_file.name}")
+    if data_file:
+        st.success(f"✅ Загружен файл: {data_file.name}")
+        
+        # Пробуем загрузить и проверить вкладки
+        try:
+            # Читаем названия всех листов
+            xl = pd.ExcelFile(data_file)
+            sheets = xl.sheet_names
+            
+            # Проверяем наличие необходимых листов
+            required_sheets = ['Точки', 'Аудиторы', 'Факт_посещений']
+            missing_sheets = [sheet for sheet in required_sheets if sheet not in sheets]
+            
+            if missing_sheets:
+                st.warning(f"⚠️ В файле отсутствуют вкладки: {', '.join(missing_sheets)}")
+                st.info("Убедитесь, что файл содержит вкладки с названиями: 'Точки', 'Аудиторы', 'Факт_посещений'")
+            else:
+                st.success("✅ Все необходимые вкладки найдены!")
+                
+                # Показываем предпросмотр каждой вкладки
+                with st.expander("📋 Предпросмотр данных", expanded=False):
+                    preview_tabs = st.tabs(["Точки", "Аудиторы", "Факт_посещений"])
+                    
+                    with preview_tabs[0]:
+                        points_preview = pd.read_excel(data_file, sheet_name='Точки', nrows=5)
+                        st.write(f"Точки: {len(points_preview)} строк")
+                        st.dataframe(points_preview, use_container_width=True)
+                    
+                    with preview_tabs[1]:
+                        auditors_preview = pd.read_excel(data_file, sheet_name='Аудиторы', nrows=5)
+                        st.write(f"Аудиторы: {len(auditors_preview)} строк")
+                        st.dataframe(auditors_preview, use_container_width=True)
+                    
+                    with preview_tabs[2]:
+                        visits_preview = pd.read_excel(data_file, sheet_name='Факт_посещений', nrows=5)
+                        st.write(f"Факт посещений: {len(visits_preview)} строк")
+                        st.dataframe(visits_preview, use_container_width=True)
+        
+        except Exception as e:
+            st.error(f"❌ Ошибка при чтении файла: {str(e)}")
     
-    with col3:
-        st.markdown("#### Файл Факт посещений")
-        visits_file = st.file_uploader(
-            "Файл с посещениями (Excel)", 
-            type=['xlsx', 'xls'], 
-            key="visits_uploader",
-            help="Файл с фактическими посещениями"
-        )
-        if visits_file:
-            st.success(f"✅ Загружен: {visits_file.name}")
-    
-    if points_file and auditors_file:
-        st.info("✅ Файлы загружены. Нажмите кнопку 'Рассчитать план'")
     else:
-        st.warning("⚠️ Загрузите как минимум файлы 'Точки' и 'Аудиторы'")
+        st.warning("⚠️ Загрузите файл с данными для продолжения")
 
 with upload_tab2:
-    st.subheader("Шаблоны файлов")
+    st.subheader("Шаблон файла")
     
-    # Создаем одну таблицу с тремя вкладками внутри
-    template_tabs = st.tabs(["Точки", "Аудиторы", "Факт посещений"])
+    st.info("""
+    **📋 Инструкция:**
+    1. Скачайте шаблон
+    2. Заполните данные на каждой вкладке
+    3. Сохраните файл
+    4. Загрузите заполненный файл в приложение
+    """)
+    
+    # Создаем файл с тремя вкладками
+    excel_buffer = io.BytesIO()
+    
+    with pd.ExcelWriter(excel_buffer, engine='openpyxl') as writer:
+        # Вкладка 1: Точки
+        points_template = create_template_points()
+        points_template.to_excel(writer, sheet_name='Точки', index=False)
+        
+        # Вкладка 2: Аудиторы
+        auditors_template = create_template_auditors()
+        auditors_template.to_excel(writer, sheet_name='Аудиторы', index=False)
+        
+        # Вкладка 3: Факт_посещений
+        visits_template = create_template_visits()
+        visits_template.to_excel(writer, sheet_name='Факт_посещений', index=False)
+    
+    excel_data = excel_buffer.getvalue()
+    
+    # Кнопка скачивания
+    st.download_button(
+        label="📥 Скачать шаблон (Excel)",
+        data=excel_data,
+        file_name="шаблон_данных.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        use_container_width=True
+    )
+    
+    # Предпросмотр вкладок шаблона
+    st.markdown("---")
+    st.markdown("**Предпросмотр шаблона:**")
+    
+    template_tabs = st.tabs(["Точки", "Аудиторы", "Факт_посещений"])
     
     with template_tabs[0]:
-        st.markdown("#### Шаблон Точки")
-        points_template = create_template_points()
-        excel_buffer = io.BytesIO()
-        with pd.ExcelWriter(excel_buffer, engine='openpyxl') as writer:
-            points_template.to_excel(writer, sheet_name='Точки', index=False)
-        excel_data = excel_buffer.getvalue()
-        st.markdown(get_download_link(excel_data, "шаблон_точки.xlsx", "📥 Скачать шаблон"), unsafe_allow_html=True)
-        
-        # Показываем предпросмотр данных
-        st.markdown("**Предпросмотр данных:**")
+        st.markdown("##### Вкладка 'Точки'")
         st.dataframe(points_template, use_container_width=True)
+        st.caption("Обязательные поля: ID_Точки, Широта, Долгота, Город, Тип")
     
     with template_tabs[1]:
-        st.markdown("#### Шаблон Аудиторы")
-        auditors_template = create_template_auditors()
-        excel_buffer = io.BytesIO()
-        with pd.ExcelWriter(excel_buffer, engine='openpyxl') as writer:
-            auditors_template.to_excel(writer, sheet_name='Аудиторы', index=False)
-        excel_data = excel_buffer.getvalue()
-        st.markdown(get_download_link(excel_data, "шаблон_аудиторы.xlsx", "📥 Скачать шаблон"), unsafe_allow_html=True)
-        
-        # Показываем предпросмотр данных
-        st.markdown("**Предпросмотр данных:**")
+        st.markdown("##### Вкладка 'Аудиторы'")
         st.dataframe(auditors_template, use_container_width=True)
+        st.caption("Обязательные поля: ID_Сотрудника, Город")
     
     with template_tabs[2]:
-        st.markdown("#### Шаблон Факт посещений")
-        visits_template = create_template_visits()
-        excel_buffer = io.BytesIO()
-        with pd.ExcelWriter(excel_buffer, engine='openpyxl') as writer:
-            visits_template.to_excel(writer, sheet_name='Факт_посещений', index=False)
-        excel_data = excel_buffer.getvalue()
-        st.markdown(get_download_link(excel_data, "шаблон_посещений.xlsx", "📥 Скачать шаблон"), unsafe_allow_html=True)
-        
-        # Показываем предпросмотр данных
-        st.markdown("**Предпросмотр данных:**")
+        st.markdown("##### Вкладка 'Факт_посещений'")
         st.dataframe(visits_template, use_container_width=True)
+        st.caption("Обязательные поля: ID_Точки, Дата_визита, ID_Сотрудника")
     
     st.markdown("---")
-    st.info("""
-    **Как использовать шаблоны:**
-    1. Скачайте все три шаблоны
-    2. Заполните данные в каждом файле
-    3. Загрузите заполненные файлы в сервис
-    4. Нажмите кнопку "Рассчитать план"
-    """)
+    st.success("✅ Шаблон содержит все три вкладки в одном файле Excel")
 
 with upload_tab3:
     st.subheader("Описание полей")
     
     # Используем st.tabs для трех вкладок внутри описания
-    desc_tabs = st.tabs(["Файл 'Точки'", "Файл 'Аудиторы'", "Файл 'Факт посещений'"])
+    desc_tabs = st.tabs(["Вкладка 'Точки'", "Вкладка 'Аудиторы'", "Вкладка 'Факт_посещений'"])
     
     with desc_tabs[0]:
         st.markdown("""
-        ### Файл 'Точки'
+        ### Вкладка 'Точки'
         
         **Обязательные поля:**
         - `ID_Точки` - уникальный идентификатор
@@ -292,7 +317,7 @@ with upload_tab3:
     
     with desc_tabs[1]:
         st.markdown("""
-        ### Файл 'Аудиторы'
+        ### Вкладка 'Аудиторы'
         
         **Обязательные поля:**
         - `ID_Сотрудника` - уникальный ID
@@ -309,10 +334,10 @@ with upload_tab3:
     
     with desc_tabs[2]:
         st.markdown("""
-        ### Файл 'Факт_посещений'
+        ### Вкладка 'Факт_посещений'
         
         **Обязательные поля:**
-        - `ID_Точки` - должен совпадать с ID в файле Точки
+        - `ID_Точки` - должен совпадать с ID во вкладке Точки
         - `Дата_визита` - дата посещения (дд.мм.гггг)
         - `ID_Сотрудника` - кто совершил визит
         
