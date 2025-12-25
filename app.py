@@ -1565,16 +1565,27 @@ if st.session_state.plan_calculated:
         if st.session_state.polygons is not None and len(st.session_state.polygons) > 0:
             polygons = st.session_state.polygons
             
+            # Проверяем, установлен ли folium
+            try:
+                import folium
+                from streamlit_folium import folium_static
+                FOLIUM_AVAILABLE = True
+            except ImportError:
+                FOLIUM_AVAILABLE = False
+            
             if not FOLIUM_AVAILABLE:
-                st.warning("""
-                ⚠️ Для отображения карты установите библиотеки:
-                ```
+                st.error("""
+                ## ⚠️ Библиотека картографии не установлена
+                
+                Для отображения интерактивной карты установите:
+                ```bash
                 pip install folium streamlit-folium
                 ```
-                После установки перезапустите приложение.
+                
+                **А пока показываем информацию в таблице:**
                 """)
                 
-                # Показываем таблицу с полигонами как альтернативу
+                # Таблица с полигонами
                 poly_data = []
                 for poly_name, poly_info in polygons.items():
                     poly_data.append({
@@ -1585,9 +1596,32 @@ if st.session_state.plan_calculated:
                     })
                 
                 if poly_data:
-                    st.dataframe(pd.DataFrame(poly_data), use_container_width=True)
+                    poly_df = pd.DataFrame(poly_data)
+                    st.dataframe(poly_df, use_container_width=True)
+                    
+                    # Выгрузка информации о полигонах в Excel
+                    try:
+                        excel_buffer = io.BytesIO()
+                        with pd.ExcelWriter(excel_buffer, engine='openpyxl') as writer:
+                            poly_df.to_excel(writer, sheet_name='Полигоны', index=False)
+                        
+                        excel_data = excel_buffer.getvalue()
+                        b64 = base64.b64encode(excel_data).decode()
+                        href = f'<a href="data:application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;base64,{b64}" download="информация_о_полигонах.xlsx">📥 Скачать информацию о полигонах</a>'
+                        st.markdown(href, unsafe_allow_html=True)
+                    except Exception as e:
+                        st.error(f"❌ Ошибка при создании Excel файла: {str(e)}")
+                    
+                    st.markdown("---")
+                    st.info("""
+                    **После установки folium и streamlit-folium:**
+                    1. Закройте приложение
+                    2. Установите: `pip install folium streamlit-folium`
+                    3. Перезапустите приложение
+                    4. Карта появится автоматически
+                    """)
             else:
-                # Код для отображения карты с folium
+                # Код для карты с folium (упрощенная версия)
                 if st.session_state.points_df is not None:
                     points_df = st.session_state.points_df
                     
@@ -1598,18 +1632,58 @@ if st.session_state.plan_calculated:
                     m = folium.Map(location=[center_lat, center_lon], zoom_start=10)
                     
                     # Простой код для отображения точек
+                    colors = ['red', 'blue', 'green', 'purple', 'orange', 'darkred']
+                    
+                    # Группируем точки по аудиторам для разных цветов
+                    if st.session_state.details_df is not None:
+                        details_df = st.session_state.details_df
+                        auditor_colors = {}
+                        auditors = details_df['Аудитор'].unique() if 'Аудитор' in details_df.columns else []
+                        
+                        for i, auditor in enumerate(auditors):
+                            auditor_colors[auditor] = colors[i % len(colors)]
+                    
                     for _, point in points_df.iterrows():
+                        # Определяем цвет по аудитору
+                        color = 'blue'  # цвет по умолчанию
+                        
                         folium.CircleMarker(
                             location=[point['Широта'], point['Долгота']],
                             radius=5,
-                            popup=f"{point['ID_Точки']}: {point['Название_Точки']}",
-                            color='blue',
-                            fill=True
+                            popup=f"""
+                            <div style="font-family: Arial, sans-serif;">
+                                <h4>🏪 {point['Название_Точки']}</h4>
+                                <p><b>🆔 ID:</b> {point['ID_Точки']}</p>
+                                <p><b>📍 Адрес:</b> {point.get('Адрес', 'Не указан')}</p>
+                                <p><b>🏷️ Тип:</b> {point['Тип']}</p>
+                                <p><b>🏙️ Город:</b> {point['Город']}</p>
+                            </div>
+                            """,
+                            tooltip=f"🏪 {point['Название_Точки']}",
+                            color=color,
+                            fill=True,
+                            fill_opacity=0.8
                         ).add_to(m)
                     
                     folium_static(m, width=1200, height=600)
+                    
+                    st.success("✅ Карта загружена с использованием Folium")
+                    
+                    # Выгрузка информации о точках в Excel
+                    try:
+                        excel_buffer = io.BytesIO()
+                        with pd.ExcelWriter(excel_buffer, engine='openpyxl') as writer:
+                            points_df.to_excel(writer, sheet_name='Точки_на_карте', index=False)
+                        
+                        excel_data = excel_buffer.getvalue()
+                        b64 = base64.b64encode(excel_data).decode()
+                        href = f'<a href="data:application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;base64,{b64}" download="точки_на_карте.xlsx">📥 Скачать точки с карты</a>'
+                        st.markdown(href, unsafe_allow_html=True)
+                    except Exception as e:
+                        st.error(f"❌ Ошибка при создании Excel файла: {str(e)}")
         else:
             st.info("Полигоны еще не сгенерированы. Нажмите кнопку 'Рассчитать план'")
+
 
 
 
