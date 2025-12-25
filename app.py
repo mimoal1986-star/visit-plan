@@ -1438,16 +1438,21 @@ if st.session_state.plan_calculated:
         if st.session_state.city_stats_df is not None:
             city_stats = st.session_state.city_stats_df.copy()
             
-            # Создаем график
-            fig = px.bar(city_stats, 
-                        x='Город', 
-                        y='%_выполнения',
-                        title='% выполнения плана по городам',
-                        color='%_выполнения',
-                        color_continuous_scale='RdYlGn')
-            
-            fig.update_layout(height=400)
-            st.plotly_chart(fig, use_container_width=True)
+            # Проверяем, есть ли нужные колонки
+            if 'Город' in city_stats.columns and '%_выполнения' in city_stats.columns:
+                # Создаем график
+                fig = px.bar(city_stats, 
+                            x='Город', 
+                            y='%_выполнения',
+                            title='% выполнения плана по городам',
+                            color='%_выполнения',
+                            color_continuous_scale='RdYlGn')
+                
+                fig.update_layout(height=400)
+                st.plotly_chart(fig, use_container_width=True)
+            else:
+                st.warning("Недостаточно данных для построения диаграммы")
+                st.write("Доступные колонки:", list(city_stats.columns))
     
     # ВКЛАДКА 5: Карта полигонов
     with results_tabs[4]:
@@ -1501,6 +1506,7 @@ if st.session_state.plan_calculated:
                     folium_static(m, width=1200, height=600)
         else:
             st.info("Полигоны еще не сгенерированы. Нажмите кнопку 'Рассчитать план'")
+
 
 
 
