@@ -500,10 +500,10 @@ def distribute_visits_by_weeks(points_assignment_df, points_df, year, quarter, c
                     'ID_Точки': point_id,
                     'Аудитор': auditor,
                     'Полигон': polygon_name,
-                    'Неделя_ISO': week['iso_week_number'],
+                    'ISO_Неделя': week['iso_week_number'],  
                     'Неделя_отчет': week['week_display'],
-                    'Дата_начала_недели': week['start_date'],
-                    'Дата_окончания_недели': week['end_date'],
+                    'Дата_начала': week['start_date'],
+                    'Дата_окончания': week['end_date'],
                     'Коэффициент_нагрузки': stage_coefficient,
                     'План_посещений': 1 if week_idx < visits_needed else 0,
                     'Город': assignment['Город']
@@ -1278,6 +1278,7 @@ elif st.session_state.get('data_loaded', False):
 
 st.markdown("---")
 st.caption("📋 **Часть 2/5:** Функции обработки данных, генерация полигонов, распределение посещений по неделям")
+
 
 
 
