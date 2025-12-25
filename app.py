@@ -1473,7 +1473,7 @@ if st.session_state.plan_calculated:
     with results_tabs[3]:
         st.subheader("📈 Диаграммы и статистика")
         
-        # Простая диаграмма выполнения плана
+        # 1. Диаграмма выполнения плана по городам
         if st.session_state.city_stats_df is not None:
             city_stats = st.session_state.city_stats_df.copy()
             
@@ -1489,9 +1489,74 @@ if st.session_state.plan_calculated:
                 
                 fig.update_layout(height=400)
                 st.plotly_chart(fig, use_container_width=True)
+                
+                # Выгрузка статистики по городам в Excel
+                if not city_stats.empty:
+                    try:
+                        excel_buffer = io.BytesIO()
+                        with pd.ExcelWriter(excel_buffer, engine='openpyxl') as writer:
+                            city_stats.to_excel(writer, sheet_name='Статистика_городов', index=False)
+                        
+                        excel_data = excel_buffer.getvalue()
+                        b64 = base64.b64encode(excel_data).decode()
+                        href = f'<a href="data:application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;base64,{b64}" download="статистика_городов.xlsx">📥 Скачать статистику по городам</a>'
+                        st.markdown(href, unsafe_allow_html=True)
+                    except Exception as e:
+                        st.error(f"❌ Ошибка при создании Excel файла: {str(e)}")
             else:
-                st.warning("Недостаточно данных для построения диаграммы")
-                st.write("Доступные колонки:", list(city_stats.columns))
+                st.warning("Недостаточно данных для построения диаграммы по городам")
+        
+        # 2. Статистика по типам точек (из исходника)
+        if st.session_state.type_stats_df is not None:
+            st.markdown("### 🏪 Статистика по типам точек")
+            type_stats = st.session_state.type_stats_df.copy()
+            
+            # Отображаем таблицу
+            if not type_stats.empty:
+                st.dataframe(type_stats, use_container_width=True, hide_index=True)
+                
+                # Простая диаграмма по типам точек
+                if 'Тип' in type_stats.columns and 'План_посещений' in type_stats.columns:
+                    fig2 = px.bar(type_stats,
+                                 x='Тип',
+                                 y='План_посещений',
+                                 title='План посещений по типам точек',
+                                 color='Тип')
+                    fig2.update_layout(height=300, showlegend=False)
+                    st.plotly_chart(fig2, use_container_width=True)
+                
+                # Выгрузка статистики по типам в Excel
+                try:
+                    excel_buffer = io.BytesIO()
+                    with pd.ExcelWriter(excel_buffer, engine='openpyxl') as writer:
+                        type_stats.to_excel(writer, sheet_name='Статистика_типов', index=False)
+                    
+                    excel_data = excel_buffer.getvalue()
+                    b64 = base64.b64encode(excel_data).decode()
+                    href = f'<a href="data:application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;base64,{b64}" download="статистика_типов_точек.xlsx">📥 Скачать статистику по типам точек</a>'
+                    st.markdown(href, unsafe_allow_html=True)
+                except Exception as e:
+                    st.error(f"❌ Ошибка при создании Excel файла: {str(e)}")
+        
+        # 3. Общая статистика
+        st.markdown("### 📊 Общая статистика")
+        
+        col1, col2, col3 = st.columns(3)
+        
+        with col1:
+            if st.session_state.points_df is not None:
+                total_points = len(st.session_state.points_df)
+                st.metric("Всего точек", total_points)
+        
+        with col2:
+            if st.session_state.auditors_df is not None:
+                total_auditors = len(st.session_state.auditors_df)
+                st.metric("Всего аудиторов", total_auditors)
+        
+        with col3:
+            if st.session_state.polygons is not None:
+                total_polygons = len(st.session_state.polygons)
+                st.metric("Полигонов", total_polygons)
     
     # ВКЛАДКА 5: Карта полигонов
     with results_tabs[4]:
@@ -1545,6 +1610,7 @@ if st.session_state.plan_calculated:
                     folium_static(m, width=1200, height=600)
         else:
             st.info("Полигоны еще не сгенерированы. Нажмите кнопку 'Рассчитать план'")
+
 
 
 
