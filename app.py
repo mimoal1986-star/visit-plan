@@ -1,3 +1,5 @@
+[file name]: app.py
+[file content begin]
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -9,12 +11,6 @@ import base64
 from typing import Dict, List, Tuple, Optional, Any
 import warnings
 warnings.filterwarnings('ignore')
-try:
-    import simplekml
-    SIMPLEKML_AVAILABLE = True
-except ImportError:
-    SIMPLEKML_AVAILABLE = False
-    st.warning("⚠️ Библиотека simplekml не установлена. Установите: pip install simplekml")
 
 # ВИЗУАЛИЗАЦИЯ
 import plotly.express as px
@@ -246,7 +242,7 @@ with upload_tab2:
     st.markdown("---")
     st.info("""
     **Как использовать шаблоны:**
-    1. Скачайте все три шаблона
+    1. Скачайте все три шаблоны
     2. Заполните данные в каждом файле
     3. Загрузите заполненные файлы в сервис
     4. Нажмите кнопку "Рассчитать план"
@@ -620,16 +616,13 @@ def generate_convex_hull(points_coords):
         if len(points_coords) == 0:
             return []
         elif len(points_coords) == 1:
-            # Извлекаем координаты
+            # ИСПРАВЛЕНИЕ: points_coords[0] может быть кортежем или списком
             point = points_coords[0]
             if isinstance(point, (list, tuple)) and len(point) >= 2:
-                lat, lon = float(point[0]), float(point[1])
+                lat, lon = point[0], point[1]
             else:
-                # Если структура непонятная
-                try:
-                    lat, lon = float(point[0]), float(point[1])
-                except:
-                    lat, lon = 55.7558, 37.6173  # Координаты Москвы по умолчанию
+                # Запасной вариант
+                lat, lon = 55.7558, 37.6173  # Координаты Москвы по умолчанию
             
             return [
                 [lat - 0.001, lon - 0.001],
@@ -639,17 +632,17 @@ def generate_convex_hull(points_coords):
                 [lat - 0.001, lon - 0.001]
             ]
         elif len(points_coords) == 2:
-            # Извлекаем координаты
+            # ИСПРАВЛЕНИЕ: правильное извлечение координат
             point1 = points_coords[0]
             point2 = points_coords[1]
             
             if isinstance(point1, (list, tuple)) and len(point1) >= 2:
-                lat1, lon1 = float(point1[0]), float(point1[1])
+                lat1, lon1 = point1[0], point1[1]
             else:
                 lat1, lon1 = 55.7558, 37.6173
                 
             if isinstance(point2, (list, tuple)) and len(point2) >= 2:
-                lat2, lon2 = float(point2[0]), float(point2[1])
+                lat2, lon2 = point2[0], point2[1]
             else:
                 lat2, lon2 = 55.7658, 37.6273
             
@@ -661,89 +654,6 @@ def generate_convex_hull(points_coords):
                 [max(lat1, lat2) + 0.001, min(lon1, lon2) - 0.001],
                 [min(lat1, lat2) - 0.001, min(lon1, lon2) - 0.001]
             ]
-    
-    try:
-        if SCIPY_AVAILABLE:
-            # Преобразуем координаты в массив numpy
-            # Фильтруем некорректные координаты
-            valid_coords = []
-            for p in points_coords:
-                try:
-                    lat, lon = float(p[0]), float(p[1])
-                    if not (41 <= lat <= 82 and 19 <= lon <= 180):
-                        continue
-                    valid_coords.append([lat, lon])
-                except:
-                    continue
-            
-            if len(valid_coords) < 3:
-                # Если после фильтрации осталось мало точек
-                return generate_convex_hull(valid_coords)  # Рекурсивно обработаем
-            
-            coords_array = np.array(valid_coords)
-            
-            # Вычисляем выпуклую оболочку
-            hull = ConvexHull(coords_array)
-            
-            # Получаем вершины полигона
-            hull_points = coords_array[hull.vertices]
-            
-            # Сортируем по углу от центра для ровного полигона
-            center = np.mean(hull_points, axis=0)
-            angles = np.arctan2(hull_points[:, 1] - center[1], hull_points[:, 0] - center[0])
-            hull_points = hull_points[np.argsort(angles)]
-            
-            # Замыкаем полигон
-            hull_points = np.vstack([hull_points, hull_points[0]])
-            
-            return hull_points.tolist()
-        else:
-            # Без scipy используем bounding box
-            valid_lats = []
-            valid_lons = []
-            for p in points_coords:
-                try:
-                    lat, lon = float(p[0]), float(p[1])
-                    if 41 <= lat <= 82 and 19 <= lon <= 180:
-                        valid_lats.append(lat)
-                        valid_lons.append(lon)
-                except:
-                    continue
-            
-            if not valid_lats or not valid_lons:
-                return []
-            
-            return [
-                [min(valid_lats) - 0.001, min(valid_lons) - 0.001],
-                [min(valid_lats) - 0.001, max(valid_lons) + 0.001],
-                [max(valid_lats) + 0.001, max(valid_lons) + 0.001],
-                [max(valid_lats) + 0.001, min(valid_lons) - 0.001],
-                [min(valid_lats) - 0.001, min(valid_lons) - 0.001]
-            ]
-        
-    except Exception as e:
-        # В случае ошибки возвращаем bounding box
-        valid_lats = []
-        valid_lons = []
-        for p in points_coords:
-            try:
-                lat, lon = float(p[0]), float(p[1])
-                if 41 <= lat <= 82 and 19 <= lon <= 180:
-                    valid_lats.append(lat)
-                    valid_lons.append(lon)
-            except:
-                continue
-        
-        if not valid_lats or not valid_lons:
-            return []
-        
-        return [
-            [min(valid_lats) - 0.001, min(valid_lons) - 0.001],
-            [min(valid_lats) - 0.001, max(valid_lons) + 0.001],
-            [max(valid_lats) + 0.001, max(valid_lons) + 0.001],
-            [max(valid_lats) + 0.001, min(valid_lons) - 0.001],
-            [min(valid_lats) - 0.001, min(valid_lons) - 0.001]
-        ]
     
     try:
         if SCIPY_AVAILABLE:
@@ -877,7 +787,7 @@ def distribute_visits_by_weeks(points_assignment_df, points_df, year, quarter, c
         
         # Распределяем посещения по неделям внутри этапов
         week_idx = 0
-
+        
         for stage_idx in range(4):
             weeks_this_stage = weeks_per_stage if stage_idx < 3 else total_weeks - 3*weeks_per_stage
             visits_this_stage = stage_visits[stage_idx]
@@ -952,7 +862,6 @@ def distribute_visits_by_weeks(points_assignment_df, points_df, year, quarter, c
         return pd.DataFrame()
     
     return pd.DataFrame(detailed_results)
-    
 
 # ==============================================
 # ОБРАБОТКА ФАКТИЧЕСКИХ ПОСЕЩЕНИЙ
@@ -1698,114 +1607,114 @@ if st.session_state.plan_calculated:
                 # Отображаем карту
                 folium_static(m, width=900, height=600)
                 
-  # Кнопка выгрузки KML
-st.markdown("---")
-st.subheader("📤 Выгрузка полигонов")
-
-col1, col2 = st.columns(2)
-
-with col1:
-    if st.button("🗺️ Выгрузить KML файл", type="primary", use_container_width=True):
-        try:
-            import simplekml  # Добавьте импорт сюда
-            # Создаем KML файл
-            kml = simplekml.Kml()
-            
-            for polygon_name, polygon_data in polygons.items():
-                # Полигон
-                pol = kml.newpolygon(name=polygon_name)
-                pol.outerboundaryis = polygon_data['coordinates']
+                # Кнопка выгрузки KML
+                st.markdown("---")
+                st.subheader("📤 Выгрузка полигонов")
                 
-                # Цвет из палитры
-                color_idx = list(polygons.keys()).index(polygon_name) % len(colors)
-                color_hex = colors[color_idx].lstrip('#')
+                col1, col2 = st.columns(2)
                 
-                # Конвертируем цвет для KML (формат aabbggrr)
-                if len(color_hex) == 6:
-                    # Из RRGGBB в AABBGGRR
-                    r = int(color_hex[0:2], 16)
-                    g = int(color_hex[2:4], 16)
-                    b = int(color_hex[4:6], 16)
-                    kml_color = simplekml.Color.rgb(b, g, r, alpha=128)  # KML использует ABGR
-                else:
-                    kml_color = simplekml.Color.red
-                
-                pol.style.polystyle.color = kml_color
-                
-                # Описание
-                pol.description = f"""
-                <![CDATA[
-                <h3>{polygon_name}</h3>
-                <p><b>Аудитор:</b> {polygon_data['auditor']}</p>
-                <p><b>Город:</b> {polygon_data['city']}</p>
-                <p><b>Количество точек:</b> {len(polygon_data['points'])}</p>
-                ]]>
-                """
-                
-                # Добавляем точки в полигон
-                folder = kml.newfolder(name=f"Точки полигона {polygon_name}")
-                for point in polygon_data['points']:
-                    point_id, lat, lon = point
-                    
-                    # Находим информацию о точке
-                    point_info = points_df[points_df['ID_Точки'] == point_id]
-                    if not point_info.empty:
-                        point_name = point_info['Название_Точки'].iloc[0]
-                        point_address = point_info['Адрес'].iloc[0] if pd.notna(point_info['Адрес'].iloc[0]) and point_info['Адрес'].iloc[0] != '' else "Адрес не указан"
-                        point_type = point_info['Тип'].iloc[0]
-                    else:
-                        point_name = point_id
-                        point_address = "Информация не найдена"
-                        point_type = "Неизвестно"
-                    
-                    pnt = folder.newpoint(name=point_name)
-                    pnt.coords = [(lon, lat)]
-                    pnt.description = f"""
-                    <![CDATA[
-                    <h4>{point_name}</h4>
-                    <p><b>ID:</b> {point_id}</p>
-                    <p><b>Адрес:</b> {point_address}</p>
-                    <p><b>Тип:</b> {point_type}</p>
-                    <p><b>Аудитор:</b> {polygon_data['auditor']}</p>
-                    ]]>
-                    """
-                    pnt.style.iconstyle.color = kml_color
-            
-            # Сохраняем KML
-            # ИСПРАВЛЕНИЕ: Сохраняем KML в буфер памяти вместо файла
-            import tempfile
-            import os
-            
-            with tempfile.NamedTemporaryFile(mode='wb', suffix='.kml', delete=False) as tmp_file:
-                kml.save(tmp_file.name)
-                tmp_file_path = tmp_file.name
+                with col1:
+                    if st.button("🗺️ Выгрузить KML файл", type="primary", use_container_width=True, key="export_kml"):
+                        try:
+                            import simplekml  # Добавьте импорт сюда
+                            # Создаем KML файл
+                            kml = simplekml.Kml()
+                            
+                            for polygon_name, polygon_data in polygons.items():
+                                # Полигон
+                                pol = kml.newpolygon(name=polygon_name)
+                                pol.outerboundaryis = polygon_data['coordinates']
+                                
+                                # Цвет из палитры
+                                color_idx = list(polygons.keys()).index(polygon_name) % len(colors)
+                                color_hex = colors[color_idx].lstrip('#')
+                                
+                                # Конвертируем цвет для KML (формат aabbggrr)
+                                if len(color_hex) == 6:
+                                    # Из RRGGBB в AABBGGRR
+                                    r = int(color_hex[0:2], 16)
+                                    g = int(color_hex[2:4], 16)
+                                    b = int(color_hex[4:6], 16)
+                                    kml_color = simplekml.Color.rgb(b, g, r, alpha=128)  # KML использует ABGR
+                                else:
+                                    kml_color = simplekml.Color.red
+                                
+                                pol.style.polystyle.color = kml_color
+                                
+                                # Описание
+                                pol.description = f"""
+                                <![CDATA[
+                                <h3>{polygon_name}</h3>
+                                <p><b>Аудитор:</b> {polygon_data['auditor']}</p>
+                                <p><b>Город:</b> {polygon_data['city']}</p>
+                                <p><b>Количество точек:</b> {len(polygon_data['points'])}</p>
+                                ]]>
+                                """
+                                
+                                # Добавляем точки в полигон
+                                folder = kml.newfolder(name=f"Точки полигона {polygon_name}")
+                                for point in polygon_data['points']:
+                                    point_id, lat, lon = point
+                                    
+                                    # Находим информацию о точке
+                                    point_info = points_df[points_df['ID_Точки'] == point_id]
+                                    if not point_info.empty:
+                                        point_name = point_info['Название_Точки'].iloc[0]
+                                        point_address = point_info['Адрес'].iloc[0] if pd.notna(point_info['Адрес'].iloc[0]) and point_info['Адрес'].iloc[0] != '' else "Адрес не указан"
+                                        point_type = point_info['Тип'].iloc[0]
+                                    else:
+                                        point_name = point_id
+                                        point_address = "Информация не найдена"
+                                        point_type = "Неизвестно"
+                                    
+                                    pnt = folder.newpoint(name=point_name)
+                                    pnt.coords = [(lon, lat)]
+                                    pnt.description = f"""
+                                    <![CDATA[
+                                    <h4>{point_name}</h4>
+                                    <p><b>ID:</b> {point_id}</p>
+                                    <p><b>Адрес:</b> {point_address}</p>
+                                    <p><b>Тип:</b> {point_type}</p>
+                                    <p><b>Аудитор:</b> {polygon_data['auditor']}</p>
+                                    ]]>
+                                    """
+                                    pnt.style.iconstyle.color = kml_color
+                            
+                            # Сохраняем KML
+                            # ИСПРАВЛЕНИЕ: Сохраняем KML в буфер памяти вместо файла
+                            import tempfile
+                            import os
+                            
+                            with tempfile.NamedTemporaryFile(mode='wb', suffix='.kml', delete=False) as tmp_file:
+                                kml.save(tmp_file.name)
+                                tmp_file_path = tmp_file.name
 
-            # Читаем из временного файла
-            with open(tmp_file_path, "rb") as f:
-                kml_data = f.read()
+                            # Читаем из временного файла
+                            with open(tmp_file_path, "rb") as f:
+                                kml_data = f.read()
 
-            # Удаляем временный файл
-            try:
-                os.unlink(tmp_file_path)
-            except:
-                pass
-            
-            b64 = base64.b64encode(kml_data).decode()
-            href = f'<a href="data:application/vnd.google-earth.kml+xml;base64,{b64}" download="полигоны_аудиторов.kml">📥 Скачать KML файл</a>'
-            st.markdown(href, unsafe_allow_html=True)
-            st.success("✅ KML файл успешно сгенерирован!")
-            
-        except Exception as e:
-            st.error(f"❌ Ошибка при генерации KML: {str(e)}")
+                            # Удаляем временный файл
+                            try:
+                                os.unlink(tmp_file_path)
+                            except:
+                                pass
+                            
+                            b64 = base64.b64encode(kml_data).decode()
+                            href = f'<a href="data:application/vnd.google-earth.kml+xml;base64,{b64}" download="полигоны_аудиторов.kml">📥 Скачать KML файл</a>'
+                            st.markdown(href, unsafe_allow_html=True)
+                            st.success("✅ KML файл успешно сгенерирован!")
+                            
+                        except Exception as e:
+                            st.error(f"❌ Ошибка при генерации KML: {str(e)}")
 
-with col2:
-    if st.button("🔄 Обновить полигоны", type="secondary", use_container_width=True):
-        st.session_state.generate_polygons_flag = True
-        st.rerun()
-    else:
-        st.info("Нет данных о точках для отображения на карте")
-    else:
-        st.info("Полигоны не сгенерированы. Нажмите кнопку 'Рассчитать план' для генерации полигонов.")
+                with col2:
+                    if st.button("🔄 Обновить полигоны", type="secondary", use_container_width=True, key="refresh_polygons"):
+                        st.session_state.generate_polygons_flag = True
+                        st.rerun()
+            else:
+                st.info("Нет данных о точках для отображения на карте")
+        else:
+            st.info("Полигоны не сгенерированы. Нажмите кнопку 'Рассчитать план' для генерации полигонов.")
     
     # ВКЛАДКА 6: Управление данными
     with results_tabs[5]:
@@ -1817,7 +1726,7 @@ with col2:
             st.markdown("### 📊 Экспорт данных")
             
             # Экспорт всех данных
-            if st.button("📥 Экспорт всех данных в Excel", type="primary", use_container_width=True):
+            if st.button("📥 Экспорт всех данных в Excel", type="primary", use_container_width=True, key="export_all"):
                 if all(key in st.session_state for key in ['points_df', 'summary_df', 'details_df', 'city_stats_df', 'type_stats_df']):
                     
                     excel_buffer = io.BytesIO()
@@ -1870,7 +1779,8 @@ with col2:
                         data=csv,
                         file_name="отметки_посещений.csv",
                         mime="text/csv",
-                        use_container_width=True
+                        use_container_width=True,
+                        key="export_visits"
                     )
                 else:
                     st.info("ℹ️ Нет сохраненных отметок о посещениях")
@@ -1883,7 +1793,7 @@ with col2:
             и сбросит состояние приложения.
             """)
             
-            if st.button("🧹 Очистить все данные", type="secondary", use_container_width=True):
+            if st.button("🧹 Очистить все данные", type="secondary", use_container_width=True, key="clear_all"):
                 # Список ключей для очистки
                 keys_to_clear = [
                     'points_df', 'auditors_df', 'visits_df',
@@ -1932,13 +1842,5 @@ st.caption(
     - Статистика план/факт/выполнение  
     - Выгрузка в Excel и KML форматы
     """
-
 )
-
-
-
-
-
-
-
-
+[file content end]
