@@ -1356,16 +1356,21 @@ if st.session_state.plan_calculated:
             
             st.dataframe(display_df, use_container_width=True, hide_index=True)
             
-            # Выгрузка в Excel
-            excel_buffer = io.BytesIO()
-            with pd.ExcelWriter(excel_buffer, engine='openpyxl') as writer:
-                # ИСПРАВЛЕНИЕ: используем оригинальные данные, а не display_df
-                city_stats.to_excel(writer, sheet_name='Статистика_городов', index=False)
-            
-            excel_data = excel_buffer.getvalue()
-            b64 = base64.b64encode(excel_data).decode()
-            href = f'<a href="data:application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;base64,{b64}" download="статистика_городов.xlsx">📥 Скачать Excel</a>'
-            st.markdown(href, unsafe_allow_html=True)
+            # Выгрузка в Excel - ДОБАВИМ ПРОВЕРКУ
+            if not city_stats.empty:
+                try:
+                    excel_buffer = io.BytesIO()
+                    with pd.ExcelWriter(excel_buffer, engine='openpyxl') as writer:
+                        city_stats.to_excel(writer, sheet_name='Статистика_городов', index=False)
+                    
+                    excel_data = excel_buffer.getvalue()
+                    b64 = base64.b64encode(excel_data).decode()
+                    href = f'<a href="data:application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;base64,{b64}" download="статистика_городов.xlsx">📥 Скачать Excel</a>'
+                    st.markdown(href, unsafe_allow_html=True)
+                except Exception as e:
+                    st.error(f"❌ Ошибка при создании Excel файла: {str(e)}")
+            else:
+                st.warning("Нет данных для выгрузки в Excel")
             
     
     # ВКЛАДКА 2: Сводный план
@@ -1394,18 +1399,24 @@ if st.session_state.plan_calculated:
                 })
                 
                 st.dataframe(display_df, use_container_width=True, height=400)
+                
+                # Выгрузка в Excel - С ПРОВЕРКОЙ
+                if not summary_df.empty:
+                    try:
+                        excel_buffer = io.BytesIO()
+                        with pd.ExcelWriter(excel_buffer, engine='openpyxl') as writer:
+                            summary_df.to_excel(writer, sheet_name='Сводный_план', index=False)
+                        
+                        excel_data = excel_buffer.getvalue()
+                        b64 = base64.b64encode(excel_data).decode()
+                        href = f'<a href="data:application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;base64,{b64}" download="сводный_план_{year}_Q{quarter}.xlsx">📥 Скачать Excel</a>'
+                        st.markdown(href, unsafe_allow_html=True)
+                    except Exception as e:
+                        st.error(f"❌ Ошибка при создании Excel файла: {str(e)}")
+                else:
+                    st.warning("Нет данных для выгрузки в Excel")
             else:
                 st.info("Нет данных для отображения")
-                   
-    st.dataframe(display_df, use_container_width=True, height=400)
-    # ДОБАВИТЬ ВЫГРУЗКУ В EXCEL
-    excel_buffer = io.BytesIO()
-    with pd.ExcelWriter(excel_buffer, engine='openpyxl') as writer:
-        details_df.to_excel(writer, sheet_name='Детализация', index=False)
-        excel_data = excel_buffer.getvalue()
-        b64 = base64.b64encode(excel_data).decode()
-        href = f'<a href="data:application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;base64,{b64}" download="детализация_{year}_Q{quarter}.xlsx">📥 Скачать Excel</a>'
-        st.markdown(href, unsafe_allow_html=True)
 
     # ВКЛАДКА 3: Детализация
     with results_tabs[2]:
@@ -1434,6 +1445,22 @@ if st.session_state.plan_calculated:
                     missing_columns = set(expected_columns) - set(available_columns)
                     if missing_columns:
                         st.warning(f"⚠️ Отсутствуют колонки: {', '.join(missing_columns)}")
+                    
+                    # Выгрузка в Excel - С ПРОВЕРКОЙ
+                    if not details_df.empty:
+                        try:
+                            excel_buffer = io.BytesIO()
+                            with pd.ExcelWriter(excel_buffer, engine='openpyxl') as writer:
+                                details_df.to_excel(writer, sheet_name='Детализация', index=False)
+                            
+                            excel_data = excel_buffer.getvalue()
+                            b64 = base64.b64encode(excel_data).decode()
+                            href = f'<a href="data:application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;base64,{b64}" download="детализация_{year}_Q{quarter}.xlsx">📥 Скачать Excel</a>'
+                            st.markdown(href, unsafe_allow_html=True)
+                        except Exception as e:
+                            st.error(f"❌ Ошибка при создании Excel файла: {str(e)}")
+                    else:
+                        st.warning("Нет данных для выгрузки в Excel")
                 else:
                     st.warning("Нет доступных колонок для отображения")
                     st.write("Доступные колонки:", list(details_df.columns))
@@ -1518,6 +1545,7 @@ if st.session_state.plan_calculated:
                     folium_static(m, width=1200, height=600)
         else:
             st.info("Полигоны еще не сгенерированы. Нажмите кнопку 'Рассчитать план'")
+
 
 
 
