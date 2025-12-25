@@ -1616,7 +1616,13 @@ if st.session_state.plan_calculated:
                 with col1:
                     if st.button("🗺️ Выгрузить KML файл", type="primary", use_container_width=True, key="export_kml"):
                         try:
-                            import simplekml  # Добавьте импорт сюда
+                            # Добавляем импорт simplekml внутри блока try
+                            try:
+                                import simplekml
+                            except ImportError:
+                                st.error("❌ Библиотека simplekml не установлена. Установите: pip install simplekml")
+                                return
+                            
                             # Создаем KML файл
                             kml = simplekml.Kml()
                             
@@ -1681,7 +1687,6 @@ if st.session_state.plan_calculated:
                                     pnt.style.iconstyle.color = kml_color
                             
                             # Сохраняем KML
-                            # ИСПРАВЛЕНИЕ: Сохраняем KML в буфер памяти вместо файла
                             import tempfile
                             import os
                             
@@ -1706,86 +1711,10 @@ if st.session_state.plan_calculated:
                             
                         except Exception as e:
                             st.error(f"❌ Ошибка при генерации KML: {str(e)}")
+                            import traceback
+                            st.error(f"Детали ошибки:\n{traceback.format_exc()}")
 
                 with col2:
-                    if st.button("🔄 Обновить полигоны", type="secondary", use_container_width=True, key="refresh_polygons"):
-                        st.session_state.generate_polygons_flag = True
-                        st.rerun()
-            else:
-                st.info("Нет данных о точках для отображения на карте")
-        else:
-            st.info("Полигоны не сгенерированы. Нажмите кнопку 'Рассчитать план' для генерации полигонов.")
-    
-    # ВКЛАДКА 6: Управление данными
-    with results_tabs[5]:
-        st.subheader("⚙️ Управление данными и экспорт")
-        
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            st.markdown("### 📊 Экспорт данных")
-            
-            # Экспорт всех данных
-            if st.button("📥 Экспорт всех данных в Excel", type="primary", use_container_width=True, key="export_all"):
-                if all(key in st.session_state for key in ['points_df', 'summary_df', 'details_df', 'city_stats_df', 'type_stats_df']):
-                    
-                    excel_buffer = io.BytesIO()
-                    
-                    with pd.ExcelWriter(excel_buffer, engine='openpyxl') as writer:
-                        st.session_state.points_df.to_excel(writer, sheet_name='Точки', index=False)
-                        st.session_state.summary_df.to_excel(writer, sheet_name='Сводный план', index=False)
-                        st.session_state.details_df.to_excel(writer, sheet_name='Детализация', index=False)
-                        st.session_state.city_stats_df.to_excel(writer, sheet_name='Статистика по городам', index=False)
-                        st.session_state.type_stats_df.to_excel(writer, sheet_name='Статистика по типам', index=False)
-                    
-                    excel_data = excel_buffer.getvalue()
-                    
-                    b64 = base64.b64encode(excel_data).decode()
-                    href = f'<a href="data:application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;base64,{b64}" download="все_данные.xlsx">📥 Скачать все данные (Excel)</a>'
-                    st.markdown(href, unsafe_allow_html=True)
-                    st.success("✅ Файл готов к скачиванию!")
-                else:
-                    st.warning("⚠️ Не все данные доступны для экспорта")
-            
-            # Экспорт отметок о посещениях
-            st.markdown("---")
-            st.markdown("### ✅ Экспорт отметок о посещениях")
-            
-            visit_keys = [key for key in st.session_state.keys() if key.startswith('visited_')]
-            
-            if visit_keys:
-                visits_data = []
-                for key in visit_keys:
-                    if st.session_state[key]:
-                        parts = key.split('_')
-                        if len(parts) >= 4:
-                            point_id = parts[1]
-                            week = parts[2]
-                            auditor = parts[3]
-                            
-                            visits_data.append({
-                                'ID_Точки': point_id,
-                                'Неделя': week,
-                                'Аудитор': auditor,
-                                'Отметка': 'Выполнено'
-                            })
-                
-                if visits_data:
-                    visits_df = pd.DataFrame(visits_data)
-                    
-                    csv = visits_df.to_csv(index=False, encoding='utf-8-sig')
-                    st.download_button(
-                        label="📥 Скачать отметки о посещениях (CSV)",
-                        data=csv,
-                        file_name="отметки_посещений.csv",
-                        mime="text/csv",
-                        use_container_width=True,
-                        key="export_visits"
-                    )
-                else:
-                    st.info("ℹ️ Нет сохраненных отметок о посещениях")
-        
-                       with col2:
                     if st.button("🔄 Обновить полигоны", type="secondary", use_container_width=True, key="refresh_polygons"):
                         st.session_state.generate_polygons_flag = True
                         st.rerun()
@@ -1921,3 +1850,4 @@ st.caption(
     - Выгрузка в Excel и KML форматы
     """
 )
+[file content end]
