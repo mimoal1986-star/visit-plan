@@ -1394,7 +1394,17 @@ if st.session_state.plan_calculated:
                 st.dataframe(display_df, use_container_width=True, height=400)
             else:
                 st.info("Нет данных для отображения")
-    
+                   
+    st.dataframe(display_df, use_container_width=True, height=400)
+    # ДОБАВИТЬ ВЫГРУЗКУ В EXCEL
+    excel_buffer = io.BytesIO()
+    with pd.ExcelWriter(excel_buffer, engine='openpyxl') as writer:
+        details_df.to_excel(writer, sheet_name='Детализация', index=False)
+        excel_data = excel_buffer.getvalue()
+        b64 = base64.b64encode(excel_data).decode()
+        href = f'<a href="data:application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;base64,{b64}" download="детализация_{year}_Q{quarter}.xlsx">📥 Скачать Excel</a>'
+        st.markdown(href, unsafe_allow_html=True)
+
     # ВКЛАДКА 3: Детализация
     with results_tabs[2]:
         st.subheader("📍 Детализация посещений")
@@ -1506,6 +1516,7 @@ if st.session_state.plan_calculated:
                     folium_static(m, width=1200, height=600)
         else:
             st.info("Полигоны еще не сгенерированы. Нажмите кнопку 'Рассчитать план'")
+
 
 
 
