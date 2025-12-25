@@ -9,6 +9,12 @@ import base64
 from typing import Dict, List, Tuple, Optional, Any
 import warnings
 warnings.filterwarnings('ignore')
+try:
+    import simplekml
+    SIMPLEKML_AVAILABLE = True
+except ImportError:
+    SIMPLEKML_AVAILABLE = False
+    st.warning("⚠️ Библиотека simplekml не установлена. Установите: pip install simplekml")
 
 # ВИЗУАЛИЗАЦИЯ
 import plotly.express as px
@@ -614,13 +620,16 @@ def generate_convex_hull(points_coords):
         if len(points_coords) == 0:
             return []
         elif len(points_coords) == 1:
-            # ИСПРАВЛЕНИЕ: points_coords[0] может быть кортежем или списком
+            # Извлекаем координаты
             point = points_coords[0]
             if isinstance(point, (list, tuple)) and len(point) >= 2:
-                lat, lon = point[0], point[1]
+                lat, lon = float(point[0]), float(point[1])
             else:
-                # Запасной вариант
-                lat, lon = 55.7558, 37.6173  # Координаты Москвы по умолчанию
+                # Если структура непонятная
+                try:
+                    lat, lon = float(point[0]), float(point[1])
+                except:
+                    lat, lon = 55.7558, 37.6173  # Координаты Москвы по умолчанию
             
             return [
                 [lat - 0.001, lon - 0.001],
@@ -630,17 +639,17 @@ def generate_convex_hull(points_coords):
                 [lat - 0.001, lon - 0.001]
             ]
         elif len(points_coords) == 2:
-            # ИСПРАВЛЕНИЕ: правильное извлечение координат
+            # Извлекаем координаты
             point1 = points_coords[0]
             point2 = points_coords[1]
             
             if isinstance(point1, (list, tuple)) and len(point1) >= 2:
-                lat1, lon1 = point1[0], point1[1]
+                lat1, lon1 = float(point1[0]), float(point1[1])
             else:
                 lat1, lon1 = 55.7558, 37.6173
                 
             if isinstance(point2, (list, tuple)) and len(point2) >= 2:
-                lat2, lon2 = point2[0], point2[1]
+                lat2, lon2 = float(point2[0]), float(point2[1])
             else:
                 lat2, lon2 = 55.7658, 37.6273
             
@@ -652,6 +661,89 @@ def generate_convex_hull(points_coords):
                 [max(lat1, lat2) + 0.001, min(lon1, lon2) - 0.001],
                 [min(lat1, lat2) - 0.001, min(lon1, lon2) - 0.001]
             ]
+    
+    try:
+        if SCIPY_AVAILABLE:
+            # Преобразуем координаты в массив numpy
+            # Фильтруем некорректные координаты
+            valid_coords = []
+            for p in points_coords:
+                try:
+                    lat, lon = float(p[0]), float(p[1])
+                    if not (41 <= lat <= 82 and 19 <= lon <= 180):
+                        continue
+                    valid_coords.append([lat, lon])
+                except:
+                    continue
+            
+            if len(valid_coords) < 3:
+                # Если после фильтрации осталось мало точек
+                return generate_convex_hull(valid_coords)  # Рекурсивно обработаем
+            
+            coords_array = np.array(valid_coords)
+            
+            # Вычисляем выпуклую оболочку
+            hull = ConvexHull(coords_array)
+            
+            # Получаем вершины полигона
+            hull_points = coords_array[hull.vertices]
+            
+            # Сортируем по углу от центра для ровного полигона
+            center = np.mean(hull_points, axis=0)
+            angles = np.arctan2(hull_points[:, 1] - center[1], hull_points[:, 0] - center[0])
+            hull_points = hull_points[np.argsort(angles)]
+            
+            # Замыкаем полигон
+            hull_points = np.vstack([hull_points, hull_points[0]])
+            
+            return hull_points.tolist()
+        else:
+            # Без scipy используем bounding box
+            valid_lats = []
+            valid_lons = []
+            for p in points_coords:
+                try:
+                    lat, lon = float(p[0]), float(p[1])
+                    if 41 <= lat <= 82 and 19 <= lon <= 180:
+                        valid_lats.append(lat)
+                        valid_lons.append(lon)
+                except:
+                    continue
+            
+            if not valid_lats or not valid_lons:
+                return []
+            
+            return [
+                [min(valid_lats) - 0.001, min(valid_lons) - 0.001],
+                [min(valid_lats) - 0.001, max(valid_lons) + 0.001],
+                [max(valid_lats) + 0.001, max(valid_lons) + 0.001],
+                [max(valid_lats) + 0.001, min(valid_lons) - 0.001],
+                [min(valid_lats) - 0.001, min(valid_lons) - 0.001]
+            ]
+        
+    except Exception as e:
+        # В случае ошибки возвращаем bounding box
+        valid_lats = []
+        valid_lons = []
+        for p in points_coords:
+            try:
+                lat, lon = float(p[0]), float(p[1])
+                if 41 <= lat <= 82 and 19 <= lon <= 180:
+                    valid_lats.append(lat)
+                    valid_lons.append(lon)
+            except:
+                continue
+        
+        if not valid_lats or not valid_lons:
+            return []
+        
+        return [
+            [min(valid_lats) - 0.001, min(valid_lons) - 0.001],
+            [min(valid_lats) - 0.001, max(valid_lons) + 0.001],
+            [max(valid_lats) + 0.001, max(valid_lons) + 0.001],
+            [max(valid_lats) + 0.001, min(valid_lons) - 0.001],
+            [min(valid_lats) - 0.001, min(valid_lons) - 0.001]
+        ]
     
     try:
         if SCIPY_AVAILABLE:
@@ -784,82 +876,82 @@ def distribute_visits_by_weeks(points_assignment_df, points_df, year, quarter, c
         stage_visits.append(max(0, remaining_visits))
         
         # Распределяем посещения по неделям внутри этапов
-week_idx = 0
-
-for stage_idx in range(4):
-    weeks_this_stage = weeks_per_stage if stage_idx < 3 else total_weeks - 3*weeks_per_stage
-    visits_this_stage = stage_visits[stage_idx]
-    remaining_visits_this_stage = visits_this_stage
+        week_idx = 0
+        
+        for stage_idx in range(4):
+            weeks_this_stage = weeks_per_stage if stage_idx < 3 else total_weeks - 3*weeks_per_stage
+            visits_this_stage = stage_visits[stage_idx]
+            remaining_visits_this_stage = visits_this_stage
+            
+            if visits_this_stage > 0 and weeks_this_stage > 0:
+                # Распределяем посещения равномерно по неделям этапа
+                # Вычисляем шаг для равномерного распределения
+                if visits_this_stage > 0:
+                    step = max(1, weeks_this_stage // visits_this_stage)
+                else:
+                    step = weeks_this_stage  # Большой шаг, чтобы не распределять
+                    
+                for week_in_stage in range(weeks_this_stage):
+                    if week_idx >= len(weeks):
+                        break
+                    
+                    week_info = stage_assignments[week_idx]
+                    
+                    # Определяем, нужно ли посещение на этой неделе
+                    has_visit = False
+                    if remaining_visits_this_stage > 0:
+                        # Распределяем равномерно
+                        if week_in_stage % step == 0:
+                            has_visit = True
+                            remaining_visits_this_stage -= 1
+                        # Последняя неделя этапа - добавляем оставшиеся посещения
+                        elif week_in_stage == weeks_this_stage - 1 and remaining_visits_this_stage > 0:
+                            has_visit = True
+                            remaining_visits_this_stage -= 1
+                    
+                    detailed_results.append({
+                        'Город': city,
+                        'Полигон': polygon,
+                        'Аудитор': auditor,
+                        'ISO_Неделя': week_info['iso_week'],
+                        'Дата_начала': week_info['start_date'],
+                        'Дата_окончания': week_info['end_date'],
+                        'ID_Точки': point_id,
+                        'Название_Точки': point_info['Название_Точки'],
+                        'Адрес': point_info['Адрес'],
+                        'Тип': point_info['Тип'],
+                        'План_посещений': 1 if has_visit else 0
+                    })
+                    
+                    week_idx += 1
+            else:
+                # Этап без посещений, все равно добавляем недели
+                for _ in range(weeks_this_stage):
+                    if week_idx >= len(weeks):
+                        break
+                    
+                    week_info = stage_assignments[week_idx]
+                    
+                    detailed_results.append({
+                        'Город': city,
+                        'Полигон': polygon,
+                        'Аудитор': auditor,
+                        'ISO_Неделя': week_info['iso_week'],
+                        'Дата_начала': week_info['start_date'],
+                        'Дата_окончания': week_info['end_date'],
+                        'ID_Точки': point_id,
+                        'Название_Точки': point_info['Название_Точки'],
+                        'Адрес': point_info['Адрес'],
+                        'Тип': point_info['Тип'],
+                        'План_посещений': 0
+                    })
+                    
+                    week_idx += 1
     
-    if visits_this_stage > 0 and weeks_this_stage > 0:
-        # Распределяем посещения равномерно по неделям этапа
-        # Вычисляем шаг для равномерного распределения
-        if visits_this_stage > 0:
-            step = max(1, weeks_this_stage // visits_this_stage)
-        else:
-            step = weeks_this_stage  # Большой шаг, чтобы не распределять
-            
-        for week_in_stage in range(weeks_this_stage):
-            if week_idx >= len(weeks):
-                break
-            
-            week_info = stage_assignments[week_idx]
-            
-            # Определяем, нужно ли посещение на этой неделе
-            has_visit = False
-            if remaining_visits_this_stage > 0:
-                # Распределяем равномерно
-                if week_in_stage % step == 0:
-                    has_visit = True
-                    remaining_visits_this_stage -= 1
-                # Последняя неделя этапа - добавляем оставшиеся посещения
-                elif week_in_stage == weeks_this_stage - 1 and remaining_visits_this_stage > 0:
-                    has_visit = True
-                    remaining_visits_this_stage -= 1
-            
-            detailed_results.append({
-                'Город': city,
-                'Полигон': polygon,
-                'Аудитор': auditor,
-                'ISO_Неделя': week_info['iso_week'],
-                'Дата_начала': week_info['start_date'],
-                'Дата_окончания': week_info['end_date'],
-                'ID_Точки': point_id,
-                'Название_Точки': point_info['Название_Точки'],
-                'Адрес': point_info['Адрес'],
-                'Тип': point_info['Тип'],
-                'План_посещений': 1 if has_visit else 0
-            })
-            
-            week_idx += 1
-    else:
-        # Этап без посещений, все равно добавляем недели
-        for _ in range(weeks_this_stage):
-            if week_idx >= len(weeks):
-                break
-            
-            week_info = stage_assignments[week_idx]
-            
-            detailed_results.append({
-                'Город': city,
-                'Полигон': polygon,
-                'Аудитор': auditor,
-                'ISO_Неделя': week_info['iso_week'],
-                'Дата_начала': week_info['start_date'],
-                'Дата_окончания': week_info['end_date'],
-                'ID_Точки': point_id,
-                'Название_Точки': point_info['Название_Точки'],
-                'Адрес': point_info['Адрес'],
-                'Тип': point_info['Тип'],
-                'План_посещений': 0
-            })
-            
-            week_idx += 1
-
-if not detailed_results:
-    return pd.DataFrame()
-
-return pd.DataFrame(detailed_results)
+    if not detailed_results:
+        return pd.DataFrame()
+    
+    return pd.DataFrame(detailed_results)
     
 
 # ==============================================
@@ -1842,6 +1934,7 @@ st.caption(
     """
 
 )
+
 
 
 
