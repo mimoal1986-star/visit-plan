@@ -1404,13 +1404,31 @@ if st.session_state.plan_calculated:
             
             # Простая таблица
             if not details_df.empty:
-                display_df = details_df[['Город', 'Полигон', 'Аудитор', 'ISO_Неделя', 
-                                        'ID_Точки', 'Название_Точки', 'Тип', 
-                                        'План_посещений', 'Факт_посещений', 'План_выполнен']].copy()
+                # Проверяем, какие колонки реально есть в данных
+                available_columns = []
+                expected_columns = ['Город', 'Полигон', 'Аудитор', 'ISO_Неделя', 
+                                   'ID_Точки', 'Название_Точки', 'Тип', 
+                                   'План_посещений', 'Факт_посещений', 'План_выполнен']
                 
-                st.dataframe(display_df, use_container_width=True, height=400)
+                for col in expected_columns:
+                    if col in details_df.columns:
+                        available_columns.append(col)
+                
+                if available_columns:
+                    display_df = details_df[available_columns].copy()
+                    st.dataframe(display_df, use_container_width=True, height=400)
+                    
+                    # Показываем информацию о недостающих колонках
+                    missing_columns = set(expected_columns) - set(available_columns)
+                    if missing_columns:
+                        st.warning(f"⚠️ Отсутствуют колонки: {', '.join(missing_columns)}")
+                else:
+                    st.warning("Нет доступных колонок для отображения")
+                    st.write("Доступные колонки:", list(details_df.columns))
             else:
                 st.info("Нет данных для отображения")
+        else:
+            st.info("Детальные данные еще не рассчитаны")
     
     # ВКЛАДКА 4: Диаграммы
     with results_tabs[3]:
@@ -1483,6 +1501,7 @@ if st.session_state.plan_calculated:
                     folium_static(m, width=1200, height=600)
         else:
             st.info("Полигоны еще не сгенерированы. Нажмите кнопку 'Рассчитать план'")
+
 
 
 
