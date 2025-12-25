@@ -337,301 +337,334 @@ with upload_tab3:
 st.markdown("---")
 
 # ==============================================
-# ФУНКЦИИ ДЛЯ ГЕНЕРАЦИИ ПОЛИГОНОВ
+# ФУНКЦИИ ДЛЯ ОБРАБОТКИ ДАННЫХ (ОБНОВЛЕННЫЕ)
 # ==============================================
 
-def generate_convex_hull(points_coords):
-    """Генерирует выпуклую оболочку для набора точек"""
-    global SCIPY_AVAILABLE
-    
-    if len(points_coords) < 3:
-        # Для 1-2 точек создаем искусственный полигон вокруг них
-        if len(points_coords) == 0:
-            return []
-        elif len(points_coords) == 1:
-            point = points_coords[0]
-            if isinstance(point, (list, tuple)) and len(point) >= 2:
-                lat, lon = point[0], point[1]
-            else:
-                lat, lon = 55.7558, 37.6173  # Координаты Москвы по умолчанию
-            
-            return [
-                [lat - 0.001, lon - 0.001],
-                [lat - 0.001, lon + 0.001],
-                [lat + 0.001, lon + 0.001],
-                [lat + 0.001, lon - 0.001],
-                [lat - 0.001, lon - 0.001]
-            ]
-        elif len(points_coords) == 2:
-            point1 = points_coords[0]
-            point2 = points_coords[1]
-            
-            if isinstance(point1, (list, tuple)) and len(point1) >= 2:
-                lat1, lon1 = point1[0], point1[1]
-            else:
-                lat1, lon1 = 55.7558, 37.6173
-                
-            if isinstance(point2, (list, tuple)) and len(point2) >= 2:
-                lat2, lon2 = point2[0], point2[1]
-            else:
-                lat2, lon2 = 55.7658, 37.6273
-            
-            # Создаем прямоугольник между двумя точками
-            return [
-                [min(lat1, lat2) - 0.001, min(lon1, lon2) - 0.001],
-                [min(lat1, lat2) - 0.001, max(lon1, lon2) + 0.001],
-                [max(lat1, lat2) + 0.001, max(lon1, lon2) + 0.001],
-                [max(lat1, lat2) + 0.001, min(lon1, lon2) - 0.001],
-                [min(lat1, lat2) - 0.001, min(lon1, lon2) - 0.001]
-            ]
-    
+def load_and_process_data(file):
+    """Загружает и обрабатывает файл с тремя вкладками"""
     try:
-        if SCIPY_AVAILABLE:
-            # Преобразуем координаты в массив numpy
-            coords_array = np.array([[p[0], p[1]] for p in points_coords])
-            
-            # Вычисляем выпуклую оболочку
-            hull = ConvexHull(coords_array)
-            
-            # Получаем вершины полигона
-            hull_points = coords_array[hull.vertices]
-            
-            # Сортируем по углу от центра для ровного полигона
-            center = np.mean(hull_points, axis=0)
-            angles = np.arctan2(hull_points[:, 1] - center[1], hull_points[:, 0] - center[0])
-            hull_points = hull_points[np.argsort(angles)]
-            
-            # Замыкаем полигон
-            hull_points = np.vstack([hull_points, hull_points[0]])
-            
-            return hull_points.tolist()
-        else:
-            # Без scipy используем bounding box
-            lats = [p[0] for p in points_coords]
-            lons = [p[1] for p in points_coords]
-            
-            return [
-                [min(lats) - 0.001, min(lons) - 0.001],
-                [min(lats) - 0.001, max(lons) + 0.001],
-                [max(lats) + 0.001, max(lons) + 0.001],
-                [max(lats) + 0.001, min(lons) - 0.001],
-                [min(lats) - 0.001, min(lons) - 0.001]
-            ]
+        # Читаем все три вкладки
+        points_df = pd.read_excel(file, sheet_name='Точки')
+        auditors_df = pd.read_excel(file, sheet_name='Аудиторы')
+        
+        # Для факта посещений может быть пустая вкладка
+        try:
+            visits_df = pd.read_excel(file, sheet_name='Факт_посещений')
+        except:
+            visits_df = pd.DataFrame(columns=['ID_Точки', 'Дата_визита', 'ID_Сотрудника'])
+        
+        return points_df, auditors_df, visits_df
         
     except Exception as e:
-        # В случае ошибки возвращаем bounding box
-        lats = [p[0] for p in points_coords]
-        lons = [p[1] for p in points_coords]
-        
-        return [
-            [min(lats) - 0.001, min(lons) - 0.001],
-            [min(lats) - 0.001, max(lons) + 0.001],
-            [max(lats) + 0.001, max(lons) + 0.001],
-            [max(lats) + 0.001, min(lons) - 0.001],
-            [min(lats) - 0.001, min(lons) - 0.001]
-        ]
+        st.error(f"❌ Ошибка при загрузке файла: {str(e)}")
+        return None, None, None
 
-def generate_polygons(polygons_info):
-    """Генерирует полигоны для всех аудиторов"""
-    polygons = {}
+# Эти функции уже есть у вас, оставьте их без изменений
+def load_and_process_points(df):
+    """Обрабатывает данные из вкладки Точки"""
+    try:
+        # Копируем DataFrame чтобы не изменять оригинал
+        points_df = df.copy()
+        
+        # Проверяем обязательные колонки
+        required_cols = ['ID_Точки', 'Широта', 'Долгота', 'Город', 'Тип']
+        missing_cols = [col for col in required_cols if col not in points_df.columns]
+        
+        if missing_cols:
+            # Попробуем найти альтернативные названия
+            column_mapping = {
+                'ID_Точки': ['ID точки', 'ID_точки', 'Point_ID'],
+                'Широта': ['Latitude', 'Lat', 'широта'],
+                'Долгота': ['Longitude', 'Lon', 'долгота'],
+                'Город': ['City', 'city', 'Город работы'],
+                'Тип': ['Type', 'Category', 'Тип точки']
+            }
+            
+            for required_col in missing_cols:
+                if required_col in column_mapping:
+                    for alt_name in column_mapping[required_col]:
+                        if alt_name in points_df.columns and required_col not in points_df.columns:
+                            points_df = points_df.rename(columns={alt_name: required_col})
+                            break
+        
+        # Проверяем еще раз
+        missing_cols = [col for col in required_cols if col not in points_df.columns]
+        if missing_cols:
+            st.error(f"❌ В файле Точки отсутствуют обязательные колонки: {', '.join(missing_cols)}")
+            return None
+        
+        # Конвертируем типы точек
+        type_mapping = {
+            'Convenience': 'Мини',
+            'convenience': 'Мини',
+            'Convenience Store': 'Мини',
+            'Convenience store': 'Мини',
+            'Hypermarket': 'Гипер',
+            'hypermarket': 'Гипер',
+            'Supermarket': 'Супер',
+            'supermarket': 'Супер',
+            'Мини': 'Мини',
+            'Гипер': 'Гипер',
+            'Супер': 'Супер'
+        }
+        
+        if 'Тип' in points_df.columns:
+            points_df['Тип'] = points_df['Тип'].map(type_mapping).fillna('Мини')
+        
+        # Обрабатываем количество посещений
+        if 'Кол-во_посещений' in points_df.columns:
+            points_df['Кол-во_посещений'] = pd.to_numeric(points_df['Кол-во_посещений'], errors='coerce').fillna(1).astype(int)
+        else:
+            points_df['Кол-во_посещений'] = 1
+        
+        # Добавляем недостающие колонки
+        if 'Название_Точки' not in points_df.columns:
+            points_df['Название_Точки'] = points_df['ID_Точки']
+        if 'Адрес' not in points_df.columns:
+            points_df['Адрес'] = ''
+        
+        # Валидация координат
+        valid_coords = points_df[
+            (points_df['Широта'] >= 41) & (points_df['Широта'] <= 82) &
+            (points_df['Долгота'] >= 19) & (points_df['Долгота'] <= 180)
+        ]
+        
+        invalid_coords = points_df[~points_df.index.isin(valid_coords.index)]
+        if len(invalid_coords) > 0:
+            st.warning(f"⚠️ Пропущено {len(invalid_coords)} точек с некорректными координатами (только Россия: широта 41-82, долгота 19-180)")
+        
+        if len(valid_coords) == 0:
+            st.error("❌ Нет точек с корректными координатами")
+            return None
+        
+        return valid_coords.reset_index(drop=True)
+        
+    except Exception as e:
+        st.error(f"❌ Ошибка при обработке данных Точки: {str(e)}")
+        return None
+
+def load_and_process_auditors(df):
+    """Обрабатывает данные из вкладки Аудиторы"""
+    try:
+        # Копируем DataFrame
+        auditors_df = df.copy()
+        
+        # Стандартизируем названия колонок
+        column_mapping = {
+            'ID_Сотрудника': ['ID Сотрудника', 'ID_сотрудника', 'Employee_ID', 'employee_id', 'Сотрудник'],
+            'Город': ['City', 'city', 'Город работы']
+        }
+        
+        for target_col, alt_names in column_mapping.items():
+            if target_col not in auditors_df.columns:
+                for alt_name in alt_names:
+                    if alt_name in auditors_df.columns:
+                        auditors_df = auditors_df.rename(columns={alt_name: target_col})
+                        break
+        
+        # Проверяем обязательные колонки
+        required_cols = ['ID_Сотрудника', 'Город']
+        missing_cols = [col for col in required_cols if col not in auditors_df.columns]
+        
+        if missing_cols:
+            st.error(f"❌ В файле Аудиторы отсутствуют обязательные колонки: {', '.join(missing_cols)}")
+            return None
+        
+        return auditors_df
+        
+    except Exception as e:
+        st.error(f"❌ Ошибка при обработке данных Аудиторы: {str(e)}")
+        return None
+
+def load_and_process_visits(df):
+    """Обрабатывает данные из вкладки Факт_посещений"""
+    try:
+        if df.empty:
+            return pd.DataFrame(columns=['ID_Точки', 'Дата_визита', 'ID_Сотрудника'])
+        
+        # Копируем DataFrame
+        visits_df = df.copy()
+        
+        # Стандартизируем названия колонок
+        column_mapping = {
+            'ID_Точки': ['ID точки', 'ID_точки', 'Point_ID'],
+            'Дата_визита': ['Дата визита', 'Дата', 'Date', 'Visit Date', 'Дата посещения'],
+            'ID_Сотрудника': ['ID Сотрудника', 'ID_сотрудника', 'Employee_ID', 'Сотрудник']
+        }
+        
+        for target_col, alt_names in column_mapping.items():
+            if target_col not in visits_df.columns:
+                for alt_name in alt_names:
+                    if alt_name in visits_df.columns:
+                        visits_df = visits_df.rename(columns={alt_name: target_col})
+                        break
+        
+        # Проверяем обязательные колонки
+        required_cols = ['ID_Точки', 'Дата_визита', 'ID_Сотрудника']
+        missing_cols = [col for col in required_cols if col not in visits_df.columns]
+        
+        if missing_cols:
+            st.warning(f"⚠️ В файле Факт_посещений отсутствуют колонки: {', '.join(missing_cols)}")
+            return pd.DataFrame(columns=required_cols)
+        
+        # Преобразуем даты (пробуем разные форматы)
+        date_formats = ['%d.%m.%Y', '%d/%m/%Y', '%d-%m-%Y', '%Y-%m-%d', '%Y/%m/%d']
+        
+        for date_format in date_formats:
+            try:
+                visits_df['Дата_визита'] = pd.to_datetime(visits_df['Дата_визита'], format=date_format, errors='raise')
+                break
+            except:
+                continue
+        else:
+            # Если ни один формат не подошел, пробуем автоопределение
+            visits_df['Дата_визита'] = pd.to_datetime(visits_df['Дата_визита'], errors='coerce')
+        
+        # Удаляем строки с невалидными датами
+        invalid_dates = visits_df['Дата_визита'].isna().sum()
+        if invalid_dates > 0:
+            st.warning(f"⚠️ Пропущено {invalid_dates} записей с невалидными датами")
+        
+        visits_df = visits_df.dropna(subset=['Дата_визита'])
+        
+        return visits_df.reset_index(drop=True)
+        
+    except Exception as e:
+        st.error(f"❌ Ошибка при обработке данных Факт_посещений: {str(e)}")
+        return pd.DataFrame(columns=['ID_Точки', 'Дата_визита', 'ID_Сотрудника'])
+
+# ==============================================
+# ФУНКЦИИ ДЛЯ РАБОТЫ С ДАТАМИ И НЕДЕЛЯМИ
+# ==============================================
+
+def get_quarter_dates(year, quarter):
+    """Возвращает даты начала и конца квартала"""
+    quarter_starts = [date(year, 1, 1), date(year, 4, 1), date(year, 7, 1), date(year, 10, 1)]
+    quarter_start = quarter_starts[quarter - 1]
     
-    for polygon_name, info in polygons_info.items():
-        points_coords = [(p[1], p[2]) for p in info['points']]  # (lat, lon)
+    if quarter == 4:
+        quarter_end = date(year + 1, 1, 1) - timedelta(days=1)
+    else:
+        quarter_end = quarter_starts[quarter] - timedelta(days=1)
+    
+    return quarter_start, quarter_end
+
+def get_iso_week(date_obj):
+    """Возвращает ISO номер недели для даты"""
+    return date_obj.isocalendar()[1]
+
+def get_weeks_in_quarter(year, quarter):
+    """Возвращает список недель в квартале с ISO номерами"""
+    quarter_start, quarter_end = get_quarter_dates(year, quarter)
+    
+    weeks = []
+    current_date = quarter_start
+    
+    while current_date <= quarter_end:
+        week_start = current_date
+        week_end = min(current_date + timedelta(days=6), quarter_end)
         
-        # Генерируем выпуклую оболочку
-        hull_coords = generate_convex_hull(points_coords)
+        iso_week = get_iso_week(week_start)
         
-        if not hull_coords:
+        weeks.append({
+            'iso_week_number': iso_week,
+            'start_date': week_start,
+            'end_date': week_end,
+            'week_display': f"Неделя {iso_week} ({week_start.strftime('%d.%m')}-{week_end.strftime('%d.%m')})"
+        })
+        
+        current_date = week_end + timedelta(days=1)
+    
+    return weeks
+
+# ==============================================
+# АЛГОРИТМ РАСПРЕДЕЛЕНИЯ ТОЧЕК ПО АУДИТОРАМ
+# ==============================================
+
+def distribute_points_to_auditors(points_df, auditors_df):
+    """
+    Распределяет точки по аудиторам внутри каждого города
+    Простой алгоритм: сортировка по долготе и деление на равные части
+    """
+    
+    results = []
+    polygons_info = {}
+    
+    # Группируем по городам
+    for city in points_df['Город'].unique():
+        city_points = points_df[points_df['Город'] == city].copy()
+        city_auditors = auditors_df[auditors_df['Город'] == city]['ID_Сотрудника'].tolist()
+        
+        if len(city_auditors) == 0:
+            st.warning(f"⚠️ В городе {city} нет аудиторов")
             continue
         
-        polygons[polygon_name] = {
-            'auditor': info['auditor'],
-            'city': polygon_name.split('-')[0],
-            'coordinates': hull_coords,
-            'points': info['points']
-        }
-    
-    return polygons
-
-# ==============================================
-# РАСПРЕДЕЛЕНИЕ ПОСЕЩЕНИЙ ПО НЕДЕЛЯМ
-# ==============================================
-
-def distribute_visits_by_weeks(points_assignment_df, points_df, year, quarter, coefficients):
-    """
-    Распределяет посещения точек по неделям квартала
-    с учетом коэффициентов этапов
-    """
-    
-    # Получаем недели квартала
-    weeks = get_weeks_in_quarter(year, quarter)
-    
-    # Определяем этапы
-    total_weeks = len(weeks)
-    weeks_per_stage = total_weeks // 4
-    stage_assignments = []
-    
-    for i, week in enumerate(weeks):
-        stage_idx = min(3, i // weeks_per_stage)
-        stage_assignments.append({
-            'iso_week': week['iso_week_number'],
-            'stage': stage_idx,
-            'coefficient': coefficients[stage_idx],
-            'start_date': week['start_date'],
-            'end_date': week['end_date']
-        })
-    
-    # Создаем структуры для результатов
-    detailed_results = []
-    
-    # Для каждой точки
-    for _, assignment in points_assignment_df.iterrows():
-        point_id = assignment['ID_Точки']
-        auditor = assignment['Аудитор']
-        city = assignment['Город']
-        polygon = assignment['Полигон']
-        
-        # Находим информацию о точке
-        point_info = points_df[points_df['ID_Точки'] == point_id].iloc[0]
-        visits_needed = point_info['Кол-во_посещений']
-        
-        # Распределяем посещения по этапам
-        total_coefficient = sum([coefficients[i] * (weeks_per_stage if i < 3 else total_weeks - 3*weeks_per_stage) 
-                               for i in range(4)])
-        
-        if total_coefficient == 0:
-            total_coefficient = 1  # Защита от деления на ноль
-        
-        # Вычисляем посещения на каждый этап (округляем вниз)
-        stage_visits = []
-        remaining_visits = visits_needed
-        
-        for i in range(3):  # Первые 3 этапа
-            stage_weight = coefficients[i] * weeks_per_stage
-            visits = int(np.floor(visits_needed * stage_weight / total_coefficient))
-            stage_visits.append(max(0, min(visits, remaining_visits)))
-            remaining_visits -= stage_visits[-1]
-        
-        # Четвертый этап получает остаток
-        stage_visits.append(max(0, remaining_visits))
-        
-        # Распределяем посещения по неделям внутри этапов
-        week_idx = 0
-        
-        for stage_idx in range(4):
-            weeks_this_stage = weeks_per_stage if stage_idx < 3 else total_weeks - 3*weeks_per_stage
-            visits_this_stage = stage_visits[stage_idx]
-            remaining_visits_this_stage = visits_this_stage
+        if len(city_auditors) == 1:
+            # Один аудитор - все точки ему
+            auditor = city_auditors[0]
+            for _, point in city_points.iterrows():
+                results.append({
+                    'ID_Точки': point['ID_Точки'],
+                    'Аудитор': auditor,
+                    'Город': city,
+                    'Полигон': city
+                })
             
-            if visits_this_stage > 0 and weeks_this_stage > 0:
-                # Распределяем посещения равномерно по неделям этапа
-                # Вычисляем шаг для равномерного распределения
-                if visits_this_stage > 0:
-                    step = max(1, weeks_this_stage // visits_this_stage)
+            # Создаем полигон для одного аудитора
+            polygons_info[f"{city}"] = {
+                'auditor': auditor,
+                'points': city_points[['ID_Точки', 'Широта', 'Долгота']].values.tolist()
+            }
+            
+        else:
+            # Несколько аудиторов - делим точки
+            # Сортируем точки по долготе (запад → восток)
+            city_points = city_points.sort_values('Долгота').reset_index(drop=True)
+            
+            # Определяем названия полигонов в зависимости от количества аудиторов
+            directions = ['Запад', 'Центр', 'Восток', 'Север', 'Юг', 
+                         'Северо-Запад', 'Северо-Восток', 'Юго-Запад', 'Юго-Восток']
+            
+            # Вычисляем индексы для деления
+            n = len(city_auditors)
+            chunk_size = len(city_points) // n
+            
+            for i, auditor in enumerate(city_auditors):
+                # Определяем диапазон точек для этого аудитора
+                start_idx = i * chunk_size
+                if i == n - 1:  # Последний аудитор получает остаток
+                    end_idx = len(city_points)
                 else:
-                    step = weeks_this_stage  # Большой шаг, чтобы не распределять
-                    
-                for week_in_stage in range(weeks_this_stage):
-                    if week_idx >= len(weeks):
-                        break
-                    
-                    week_info = stage_assignments[week_idx]
-                    
-                    # Определяем, нужно ли посещение на этой неделе
-                    has_visit = False
-                    if remaining_visits_this_stage > 0:
-                        # Распределяем равномерно
-                        if week_in_stage % step == 0:
-                            has_visit = True
-                            remaining_visits_this_stage -= 1
-                        # Последняя неделя этапа - добавляем оставшиеся посещения
-                        elif week_in_stage == weeks_this_stage - 1 and remaining_visits_this_stage > 0:
-                            has_visit = True
-                            remaining_visits_this_stage -= 1
-                    
-                    detailed_results.append({
-                        'Город': city,
-                        'Полигон': polygon,
+                    end_idx = (i + 1) * chunk_size
+                
+                auditor_points = city_points.iloc[start_idx:end_idx]
+                
+                if len(auditor_points) == 0:
+                    st.warning(f"⚠️ Аудитор {auditor} в городе {city} не получил точек")
+                    continue
+                
+                # Добавляем точки в результаты
+                for _, point in auditor_points.iterrows():
+                    polygon_name = f"{city}-{directions[i % len(directions)]}"
+                    results.append({
+                        'ID_Точки': point['ID_Точки'],
                         'Аудитор': auditor,
-                        'ISO_Неделя': week_info['iso_week'],
-                        'Дата_начала': week_info['start_date'],
-                        'Дата_окончания': week_info['end_date'],
-                        'ID_Точки': point_id,
-                        'Название_Точки': point_info['Название_Точки'],
-                        'Адрес': point_info['Адрес'],
-                        'Тип': point_info['Тип'],
-                        'План_посещений': 1 if has_visit else 0
-                    })
-                    
-                    week_idx += 1
-            else:
-                # Этап без посещений, все равно добавляем недели
-                for _ in range(weeks_this_stage):
-                    if week_idx >= len(weeks):
-                        break
-                    
-                    week_info = stage_assignments[week_idx]
-                    
-                    detailed_results.append({
                         'Город': city,
-                        'Полигон': polygon,
-                        'Аудитор': auditor,
-                        'ISO_Неделя': week_info['iso_week'],
-                        'Дата_начала': week_info['start_date'],
-                        'Дата_окончания': week_info['end_date'],
-                        'ID_Точки': point_id,
-                        'Название_Точки': point_info['Название_Точки'],
-                        'Адрес': point_info['Адрес'],
-                        'Тип': point_info['Тип'],
-                        'План_посещений': 0
+                        'Полигон': polygon_name
                     })
-                    
-                    week_idx += 1
+                
+                # Сохраняем информацию для полигона
+                polygon_name = f"{city}-{directions[i % len(directions)]}"
+                polygons_info[polygon_name] = {
+                    'auditor': auditor,
+                    'points': auditor_points[['ID_Точки', 'Широта', 'Долгота']].values.tolist()
+                }
     
-    if not detailed_results:
-        return pd.DataFrame()
+    if not results:
+        st.error("❌ Не удалось распределить точки по аудиторам")
+        return None, None
     
-    return pd.DataFrame(detailed_results)
-
-# ==============================================
-# ОБРАБОТКА ФАКТИЧЕСКИХ ПОСЕЩЕНИЙ
-# ==============================================
-
-def process_actual_visits(visits_df, points_df, year, quarter):
-    """Обрабатывает фактические посещения"""
-    if visits_df.empty:
-        return pd.DataFrame(columns=['ID_Точки', 'Дата_визита', 'ID_Сотрудника', 'ISO_Неделя'])
-    
-    quarter_start, quarter_end = get_quarter_dates(year, quarter)
-
-    # Преобразуем date в datetime для сравнения с pd.Timestamp
-    from datetime import datetime as dt_datetime
-    
-    quarter_start_dt = pd.Timestamp(dt_datetime.combine(quarter_start, dt_datetime.min.time()))
-    quarter_end_dt = pd.Timestamp(dt_datetime.combine(quarter_end, dt_datetime.max.time()))
-    
-    # Фильтруем посещения по кварталу
-    visits_in_quarter = visits_df[
-        (visits_df['Дата_визита'] >= quarter_start_dt) &
-        (visits_df['Дата_визита'] <= quarter_end_dt)
-    ].copy()
-    
-    if visits_in_quarter.empty:
-        return pd.DataFrame(columns=['ID_Точки', 'Дата_визита', 'ID_Сотрудника', 'ISO_Неделя'])
-    
-    # Добавляем ISO неделю
-    visits_in_quarter['ISO_Неделя'] = visits_in_quarter['Дата_визита'].apply(get_iso_week)
-    
-    # Проверяем соответствие точек
-    valid_point_ids = set(points_df['ID_Точки'].unique())
-    invalid_visits = visits_in_quarter[~visits_in_quarter['ID_Точки'].isin(valid_point_ids)]
-    
-    if len(invalid_visits) > 0:
-        st.warning(f"⚠️ Найдено {len(invalid_visits)} посещений несуществующих точек")
-    
-    visits_in_quarter = visits_in_quarter[visits_in_quarter['ID_Точки'].isin(valid_point_ids)]
-    
-    return visits_in_quarter.reset_index(drop=True)
+    return pd.DataFrame(results), polygons_info
 
 # ==============================================
 # КНОПКА РАСЧЕТА ПЛАНА (полная реализация)
@@ -1123,110 +1156,6 @@ def distribute_points_to_auditors(points_df, auditors_df):
     return pd.DataFrame(results), polygons_info
 
 # ==============================================
-# КНОПКА РАСЧЕТА ПЛАНА (полная реализация)
-# ==============================================
-
-if st.button("🚀 Рассчитать план", type="primary", use_container_width=True, key="calculate_plan_main"):
-    
-    if 'data_file' not in st.session_state or st.session_state.data_file is None:
-        st.error("⚠️ Пожалуйста, сначала загрузите файл с данными!")
-        st.stop()
-    
-    data_file = st.session_state.data_file
-    
-    try:
-        with st.spinner("🔄 Загрузка и обработка данных..."):
-            # Загружаем данные из одного файла
-            points_raw, auditors_raw, visits_raw = load_and_process_data(data_file)
-            
-            if points_raw is None or auditors_raw is None:
-                st.stop()
-            
-            # Обрабатываем каждую таблицу
-            points_df = load_and_process_points(points_raw)
-            auditors_df = load_and_process_auditors(auditors_raw)
-            visits_df = load_and_process_visits(visits_raw)
-            
-            if points_df is None or auditors_df is None:
-                st.stop()
-            
-            # Сохраняем в session state
-            st.session_state.points_df = points_df
-            st.session_state.auditors_df = auditors_df
-            st.session_state.visits_df = visits_df
-            
-            # Проверяем соответствие городов
-            cities_points = set(points_df['Город'].unique())
-            cities_auditors = set(auditors_df['Город'].unique())
-            
-            cities_without_auditors = cities_points - cities_auditors
-            cities_without_points = cities_auditors - cities_points
-            
-            if cities_without_auditors:
-                st.warning(f"⚠️ В городах {', '.join(cities_without_auditors)} нет аудиторов")
-            
-            if cities_without_points:
-                st.warning(f"⚠️ Аудиторы в городах {', '.join(cities_without_points)} не имеют точек")
-        
-        # Показываем предпросмотр данных
-        st.success("✅ Данные успешно загружены!")
-        
-        with st.expander("📋 Предпросмотр загруженных данных", expanded=False):
-            tab1, tab2, tab3 = st.tabs(["Точки", "Аудиторы", "Факт посещений"])
-            
-            with tab1:
-                st.write(f"Загружено точек: {len(points_df)}")
-                st.dataframe(points_df.head(10), use_container_width=True)
-            
-            with tab2:
-                st.write(f"Загружено аудиторов: {len(auditors_df)}")
-                st.dataframe(auditors_df.head(10), use_container_width=True)
-            
-            with tab3:
-                if not visits_df.empty:
-                    st.write(f"Загружено записей о посещениях: {len(visits_df)}")
-                    st.dataframe(visits_df.head(10), use_container_width=True)
-                else:
-                    st.info("Данные о посещениях отсутствуют")
-        
-        st.markdown("---")
-        st.header("📅 Расчет плана визитов")
-        
-        with st.spinner("🔄 Распределение точек по аудиторам..."):
-            # Распределяем точки по аудиторам
-            points_assignment_df, polygons_info = distribute_points_to_auditors(points_df, auditors_df)
-            
-            if points_assignment_df is None:
-                st.error("❌ Не удалось распределить точки по аудиторам")
-                st.stop()
-            
-            st.success(f"✅ Точки распределены по {len(polygons_info)} полигонам")
-        
-        # Показываем краткую статистику распределения
-        col1, col2, col3, col4 = st.columns(4)
-        with col1:
-            st.metric("Всего точек", len(points_df))
-        with col2:
-            st.metric("Всего аудиторов", len(auditors_df))
-        with col3:
-            st.metric("Полигонов", len(polygons_info))
-        with col4:
-            avg_points = len(points_df) / len(auditors_df) if len(auditors_df) > 0 else 0
-            st.metric("Среднее точек на аудитора", f"{avg_points:.1f}")
-        
-        # Сохраняем предварительные результаты
-        st.session_state.polygons_info = polygons_info
-        st.session_state.points_assignment_df = points_assignment_df
-        st.session_state.data_loaded = True
-        
-        st.success("✅ Готово! Данные обработаны и распределены по аудиторам.")
-        
-    except Exception as e:
-        st.error(f"❌ Произошла ошибка: {str(e)}")
-        import traceback
-        st.error(f"Детали ошибки:\n{traceback.format_exc()}")
-
-# ==============================================
 # ИНФОРМАЦИЯ О ПРОГРЕССЕ
 # ==============================================
 
@@ -1257,4 +1186,5 @@ if st.session_state.get('data_loaded', False):
 st.markdown("---")
 
 st.caption("📋 **Часть 2/5:** Функции обработки данных, работа с датами, распределение точек по аудиторам")
+
 
