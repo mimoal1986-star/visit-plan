@@ -1095,7 +1095,8 @@ if calculate_button:
             # Распределяем точки по аудиторам
             points_assignment_df, polygons_info = distribute_points_to_auditors(points_df, auditors_df)
             
-            if points_assignment_df is None:
+            # ИСПРАВЛЕНИЕ: проверяем оба возвращаемых значения
+            if points_assignment_df is None or polygons_info is None:
                 st.error("❌ Не удалось распределить точки по аудиторам")
                 st.stop()
             
@@ -1249,6 +1250,7 @@ elif st.session_state.get('data_loaded', False):
 
 st.markdown("---")
 st.caption("📋 **Часть 2/5:** Функции обработки данных, генерация полигонов, распределение посещений по неделям")
+
 
 
 
