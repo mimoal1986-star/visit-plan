@@ -15,13 +15,18 @@ import plotly.express as px
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
-# ГЕОМЕТРИЯ
+# ГЕОМЕТРИЯ - всегда используем упрощенную версию
+SCIPY_AVAILABLE = False
 try:
+    # Пробуем импортировать scipy
+    import scipy
+    # Проверяем, можем ли мы использовать ConvexHull
     from scipy.spatial import ConvexHull
     SCIPY_AVAILABLE = True
-except ImportError:
+    st.sidebar.success("✅ SciPy доступен")
+except:
     SCIPY_AVAILABLE = False
-    st.warning("⚠️ Библиотека scipy не установлена. Установите: pip install scipy")
+    st.sidebar.info("ℹ️ Используется упрощенная генерация полигонов")
 
 # НАСТРОЙКА СТРАНИЦЫ
 st.set_page_config(
@@ -393,51 +398,73 @@ def get_weeks_in_quarter(year, quarter):
 # ==============================================
 # ФУНКЦИИ ДЛЯ ГЕНЕРАЦИИ ПОЛИГОНОВ И РАСПРЕДЕЛЕНИЯ
 # ==============================================
+def create_simple_polygon(points):
+    """Создает простой полигон (прямоугольник) без SciPy"""
+    if len(points) == 0:
+        return []
+    
+    # Берем только координаты
+    if isinstance(points, np.ndarray):
+        coords = points[:, 1:3].tolist()
+    else:
+        coords = [[p[1], p[2]] for p in points]  # [широта, долгота]
+    
+    if len(coords) == 1:
+        # Одна точка - возвращаем пустой список
+        return []
+    elif len(coords) == 2:
+        # Две точки - создаем линию
+        return [coords[0], coords[1], coords[0]]
+    else:
+        # Несколько точек - создаем bounding box
+        lats = [c[0] for c in coords]
+        lons = [c[1] for c in coords]
+        
+        min_lat, max_lat = min(lats), max(lats)
+        min_lon, max_lon = min(lons), max(lons)
+        
+        # Создаем прямоугольник
+        polygon = [
+            [min_lat, min_lon],  # нижний левый
+            [min_lat, max_lon],  # нижний правый
+            [max_lat, max_lon],  # верхний правый
+            [max_lat, min_lon],  # верхний левый
+            [min_lat, min_lon]   # замыкаем полигон
+        ]
 
+        return polygon
+        
 def generate_polygons(polygons_info):
     """Генерирует полигоны на основе информации о точках"""
     polygons = {}
-    
-    if not SCIPY_AVAILABLE:
-        st.warning("⚠️ Библиотека scipy не установлена. Полигоны не будут сгенерированы.")
-        return polygons
     
     try:
         for polygon_name, info in polygons_info.items():
             points = np.array(info['points'])
             
-            if len(points) >= 3:
-                try:
-                    # Исправлено: правильный доступ к координатам
-                    hull = ConvexHull(points[:, 1:3])  # Берем только координаты (широта, долгота)
-                    polygon_coords = points[hull.vertices, 1:3].tolist()
-                    
-                    # Замыкаем полигон
-                    if len(polygon_coords) > 0:
-                        polygon_coords.append(polygon_coords[0])
-                    
-                    polygons[polygon_name] = {
-                        'auditor': info['auditor'],
-                        'coordinates': polygon_coords,
-                        'points_count': len(points)
-                    }
-                except Exception as e:
-                    st.warning(f"⚠️ Не удалось создать полигон для {polygon_name}: {str(e)}")
-                    polygons[polygon_name] = {
-                        'auditor': info['auditor'],
-                        'coordinates': [],
-                        'points_count': len(points)
-                    }
-            else:
+            if len(points) < 2:
+                # Если меньше 2 точек, не можем построить полигон
                 polygons[polygon_name] = {
                     'auditor': info['auditor'],
                     'coordinates': [],
                     'points_count': len(points)
                 }
+                continue
+            
+            # Всегда используем упрощенный метод
+            polygon_coords = create_simple_polygon(points)
+            
+            polygons[polygon_name] = {
+                'auditor': info['auditor'],
+                'coordinates': polygon_coords,
+                'points_count': len(points)
+            }
         
         return polygons
     except Exception as e:
         st.error(f"❌ Ошибка при генерации полигонов: {str(e)}")
+        import traceback
+        st.error(f"Детали ошибки:\n{traceback.format_exc()}")
         return {}
 
 def distribute_visits_by_weeks(points_assignment_df, points_df, year, quarter, coefficients):
@@ -952,3 +979,4 @@ elif st.session_state.get('data_loaded', False):
 
 st.markdown("---")
 st.caption("📋 **Часть 2/5:** Функции обработки данных, генерация полигонов, распределение посещений по неделям")
+
