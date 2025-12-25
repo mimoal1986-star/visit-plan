@@ -1359,12 +1359,14 @@ if st.session_state.plan_calculated:
             # Выгрузка в Excel
             excel_buffer = io.BytesIO()
             with pd.ExcelWriter(excel_buffer, engine='openpyxl') as writer:
-                display_df.to_excel(writer, sheet_name='Статистика по городам', index=False)
+                # ИСПРАВЛЕНИЕ: используем оригинальные данные, а не display_df
+                city_stats.to_excel(writer, sheet_name='Статистика_городов', index=False)
             
             excel_data = excel_buffer.getvalue()
             b64 = base64.b64encode(excel_data).decode()
             href = f'<a href="data:application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;base64,{b64}" download="статистика_городов.xlsx">📥 Скачать Excel</a>'
             st.markdown(href, unsafe_allow_html=True)
+            
     
     # ВКЛАДКА 2: Сводный план
     with results_tabs[1]:
@@ -1516,6 +1518,7 @@ if st.session_state.plan_calculated:
                     folium_static(m, width=1200, height=600)
         else:
             st.info("Полигоны еще не сгенерированы. Нажмите кнопку 'Рассчитать план'")
+
 
 
 
