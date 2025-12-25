@@ -68,8 +68,6 @@ if 'polygons' not in st.session_state:
     st.session_state.polygons = None
 if 'plan_calculated' not in st.session_state:
     st.session_state.plan_calculated = False
-if 'generate_polygons_flag' not in st.session_state:
-    st.session_state.generate_polygons_flag = False
 if 'data_loaded' not in st.session_state:
     st.session_state.data_loaded = False
 if 'plan_partial' not in st.session_state:
@@ -101,14 +99,6 @@ with st.sidebar:
     coefficients = [stage1, stage2, stage3, stage4]
     
     st.markdown("---")
-    
-    # Кнопка генерации полигонов
-    if st.button("🗺️ Сгенерировать полигоны", type="secondary", use_container_width=True, key="generate_polygons_btn"):
-        if st.session_state.plan_calculated:
-            st.session_state.generate_polygons_flag = True
-            st.rerun()
-        else:
-            st.warning("Сначала рассчитайте план!")
     
     st.info("""
     **Инструкция:**
@@ -1733,6 +1723,7 @@ if st.session_state.plan_calculated:
             
         except Exception as e:
             st.error(f"❌ Ошибка при создании полного отчета: {str(e)}")
+
 
 
 
