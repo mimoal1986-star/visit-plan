@@ -1683,6 +1683,56 @@ if st.session_state.plan_calculated:
                         st.error(f"❌ Ошибка при создании Excel файла: {str(e)}")
         else:
             st.info("Полигоны еще не сгенерированы. Нажмите кнопку 'Рассчитать план'")
+    st.markdown("---")
+    st.subheader("💾 Скачать ВСЕ отчеты одним файлом")
+    
+    if st.button("📦 Скачать ПОЛНЫЙ ОТЧЕТ (все данные в одном Excel)", use_container_width=True, type="primary"):
+        try:
+            excel_buffer = io.BytesIO()
+            with pd.ExcelWriter(excel_buffer, engine='openpyxl') as writer:
+                # Добавляем все доступные данные
+                if st.session_state.city_stats_df is not None and not st.session_state.city_stats_df.empty:
+                    st.session_state.city_stats_df.to_excel(writer, sheet_name='01_Статистика_городов', index=False)
+                
+                if st.session_state.type_stats_df is not None and not st.session_state.type_stats_df.empty:
+                    st.session_state.type_stats_df.to_excel(writer, sheet_name='02_Статистика_типов', index=False)
+                
+                if st.session_state.summary_df is not None and not st.session_state.summary_df.empty:
+                    st.session_state.summary_df.to_excel(writer, sheet_name='03_Сводный_план', index=False)
+                
+                if st.session_state.details_df is not None and not st.session_state.details_df.empty:
+                    st.session_state.details_df.to_excel(writer, sheet_name='04_Детализация', index=False)
+                
+                if st.session_state.points_df is not None and not st.session_state.points_df.empty:
+                    st.session_state.points_df.to_excel(writer, sheet_name='05_Точки', index=False)
+                
+                if st.session_state.auditors_df is not None and not st.session_state.auditors_df.empty:
+                    st.session_state.auditors_df.to_excel(writer, sheet_name='06_Аудиторы', index=False)
+                
+                # Добавляем информацию о полигонах если есть
+                if st.session_state.polygons is not None:
+                    poly_data = []
+                    for poly_name, poly_info in st.session_state.polygons.items():
+                        poly_data.append({
+                            'Полигон': poly_name,
+                            'Аудитор': poly_info.get('auditor', 'Неизвестно'),
+                            'Точек': len(poly_info.get('points', [])),
+                            'Город': poly_info.get('city', 'Неизвестно')
+                        })
+                    if poly_data:
+                        pd.DataFrame(poly_data).to_excel(writer, sheet_name='07_Полигоны', index=False)
+            
+            excel_data = excel_buffer.getvalue()
+            st.download_button(
+                label="⬇️ Нажмите чтобы скачать",
+                data=excel_data,
+                file_name=f"ПОЛНЫЙ_ОТЧЕТ_{year}_Q{quarter}.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                use_container_width=True
+            )
+            
+        except Exception as e:
+            st.error(f"❌ Ошибка при создании полного отчета: {str(e)}")
 
 
 
