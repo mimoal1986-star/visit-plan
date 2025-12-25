@@ -438,14 +438,31 @@ def generate_polygons(polygons_info):
     """Генерирует полигоны на основе информации о точках"""
     polygons = {}
     
+    # ИСПРАВЛЕНИЕ: проверяем входные данные
+    if not polygons_info or not isinstance(polygons_info, dict):
+        return {}
+    
     try:
         for polygon_name, info in polygons_info.items():
+            # ИСПРАВЛЕНИЕ: проверяем структуру info
+            if not info or not isinstance(info, dict) or 'points' not in info:
+                continue
+                
             points = np.array(info['points'])
             
+            # ИСПРАВЛЕНИЕ: добавляем проверку на пустые данные
+            if len(points) == 0:
+                polygons[polygon_name] = {
+                    'auditor': info.get('auditor', 'Неизвестно'),
+                    'coordinates': [],
+                    'points_count': 0
+                }
+                continue
+                
             if len(points) < 2:
                 # Если меньше 2 точек, не можем построить полигон
                 polygons[polygon_name] = {
-                    'auditor': info['auditor'],
+                    'auditor': info.get('auditor', 'Неизвестно'),
                     'coordinates': [],
                     'points_count': len(points)
                 }
@@ -1250,6 +1267,7 @@ elif st.session_state.get('data_loaded', False):
 
 st.markdown("---")
 st.caption("📋 **Часть 2/5:** Функции обработки данных, генерация полигонов, распределение посещений по неделям")
+
 
 
 
