@@ -1158,14 +1158,59 @@ if calculate_button:
             total_visits = points_df['Кол-во_посещений'].sum()
             st.metric("Всего посещений", total_visits)
         
-        # Сохраняем предварительные результаты
-        st.session_state.polygons_info = polygons_info
-        st.session_state.points_assignment_df = points_assignment_df
-        st.session_state.detailed_plan_df = detailed_plan_df
-        st.session_state.data_loaded = True
-        st.session_state.plan_partial = True  # Отметка, что план частично рассчитан
+        # ==============================================
+        # ПОЛНЫЙ РАСЧЕТ СО СТАТИСТИКОЙ (ВАРИАНТ 2)
+        # ==============================================
         
-        st.success("✅ План частично рассчитан! Готово для полного расчета со статистикой.")
+        with st.spinner("📊 Расчет полной статистики..."):
+            try:
+                # Рассчитываем полную статистику
+                city_stats_df, type_stats_df, summary_df, detailed_with_fact = calculate_statistics(
+                    points_df, visits_df, detailed_plan_df, year, quarter
+                )
+                
+                # Сохраняем результаты в session state
+                st.session_state.city_stats_df = city_stats_df
+                st.session_state.type_stats_df = type_stats_df
+                st.session_state.summary_df = summary_df
+                st.session_state.details_df = detailed_with_fact
+                st.session_state.plan_calculated = True
+                st.session_state.plan_partial = False  # Теперь план полный
+                
+                st.success("✅ Полный расчет завершен! Статистика готова.")
+                
+                # Показываем итоговую статистику
+                st.markdown("---")
+                st.header("📊 Итоговая статистика")
+                
+                col1, col2, col3, col4 = st.columns(4)
+                with col1:
+                    st.metric("Городов", len(city_stats_df))
+                with col2:
+                    total_plan = points_df['Кол-во_посещений'].sum()
+                    st.metric("План посещений", total_plan)
+                with col3:
+                    total_fact = city_stats_df['Факт_посещений'].sum()
+                    st.metric("Факт посещений", total_fact)
+                with col4:
+                    total_completion = round((total_fact / total_plan * 100) if total_plan > 0 else 0, 1)
+                    st.metric("% выполнения", f"{total_completion}%")
+                
+                # Запускаем анимацию
+                st.balloons()
+                
+            except Exception as e:
+                st.error(f"❌ Ошибка при расчете статистики: {str(e)}")
+                st.info("Будет показан частичный расчет без статистики")
+                
+                # Сохраняем хотя бы частичные результаты
+                st.session_state.polygons_info = polygons_info
+                st.session_state.points_assignment_df = points_assignment_df
+                st.session_state.detailed_plan_df = detailed_plan_df
+                st.session_state.data_loaded = True
+                st.session_state.plan_partial = True
+                
+                st.success("✅ План частично рассчитан! Некоторые функции могут быть недоступны.")
         
     except Exception as e:
         st.error(f"❌ Произошла ошибка: {str(e)}")
@@ -1233,6 +1278,7 @@ elif st.session_state.get('data_loaded', False):
 
 st.markdown("---")
 st.caption("📋 **Часть 2/5:** Функции обработки данных, генерация полигонов, распределение посещений по неделям")
+
 
 
 
