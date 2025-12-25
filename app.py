@@ -877,7 +877,7 @@ def distribute_visits_by_weeks(points_assignment_df, points_df, year, quarter, c
         
         # Распределяем посещения по неделям внутри этапов
         week_idx = 0
-        
+
         for stage_idx in range(4):
             weeks_this_stage = weeks_per_stage if stage_idx < 3 else total_weeks - 3*weeks_per_stage
             visits_this_stage = stage_visits[stage_idx]
@@ -1934,6 +1934,7 @@ st.caption(
     """
 
 )
+
 
 
 
