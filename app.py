@@ -884,7 +884,6 @@ visits_in_quarter = visits_df[
     (visits_df['Дата_визита'] >= quarter_start_dt) &
     (visits_df['Дата_визита'] <= quarter_end_dt)
 ].copy()
-    
     if visits_in_quarter.empty:
         return pd.DataFrame(columns=['ID_Точки', 'Дата_визита', 'ID_Сотрудника', 'ISO_Неделя'])
     
@@ -900,7 +899,7 @@ visits_in_quarter = visits_df[
     
     visits_in_quarter = visits_in_quarter[visits_in_quarter['ID_Точки'].isin(valid_point_ids)]
     
-    return visits_in_quarter.reset_index(drop=True)
+        return visits_in_quarter.reset_index(drop=True)
 
 # ==============================================
 # РАСЧЕТ СТАТИСТИКИ
@@ -1842,3 +1841,4 @@ st.caption(
     """
 
 )
+
