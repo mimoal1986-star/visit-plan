@@ -1723,6 +1723,25 @@ if st.session_state.plan_calculated:
             
         except Exception as e:
             st.error(f"❌ Ошибка при создании полного отчета: {str(e)}")
+# ==============================================
+# ИСПРАВЛЕНИЕ: СКРЫВАЕМ КНОПКУ "СГЕНЕРИРОВАТЬ ПОЛИГОНЫ"
+# ==============================================
+
+# Если кнопка все еще отображается, принудительно скрываем ее
+st.markdown("""
+<style>
+/* Скрываем кнопку "Сгенерировать полигоны" если она существует */
+div[data-testid="stSidebar"] button:contains("Сгенерировать полигоны"),
+div[data-testid="stSidebar"] div:has-text("Сгенерировать полигоны"),
+div[data-testid="stSidebar"] *:contains("Сгенерировать полигоны") {
+    display: none !important;
+}
+</style>
+""", unsafe_allow_html=True)
+
+# Также очищаем session state для старой кнопки
+if 'generate_polygons' in st.session_state:
+    del st.session_state['generate_polygons']
 
 
 
