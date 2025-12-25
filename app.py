@@ -618,9 +618,9 @@ def process_actual_visits(visits_df, points_df, year, quarter):
     quarter_start, quarter_end = get_quarter_dates(year, quarter)
     
     # Преобразуем даты для сравнения
-    from datetime import datetime as dt_datetime
-    quarter_start_dt = pd.Timestamp(dt_datetime.combine(quarter_start, dt_datetime.min.time()))
-    quarter_end_dt = pd.Timestamp(dt_datetime.combine(quarter_end, dt_datetime.max.time()))
+    # ИСПРАВЛЕНИЕ: используем уже импортированный datetime
+    quarter_start_dt = pd.Timestamp(datetime.combine(quarter_start, datetime.min.time()))
+    quarter_end_dt = pd.Timestamp(datetime.combine(quarter_end, datetime.max.time()))
     
     # Фильтруем посещения по кварталу
     visits_in_quarter = visits_df[
@@ -1249,6 +1249,7 @@ elif st.session_state.get('data_loaded', False):
 
 st.markdown("---")
 st.caption("📋 **Часть 2/5:** Функции обработки данных, генерация полигонов, распределение посещений по неделям")
+
 
 
 
