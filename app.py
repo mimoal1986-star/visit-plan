@@ -1190,7 +1190,7 @@ if calculate_button:
             st.metric("Всего аудиторов", len(auditors_df))
         with col3:
             st.metric("Полигонов", len(polygons))
-            with col4:
+        with col4:
             total_visits = points_df['Кол-во_посещений'].sum()
             st.metric("Всего посещений", total_visits)
         
@@ -1483,6 +1483,7 @@ if st.session_state.plan_calculated:
                     folium_static(m, width=1200, height=600)
         else:
             st.info("Полигоны еще не сгенерированы. Нажмите кнопку 'Рассчитать план'")
+
 
 
 
