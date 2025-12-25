@@ -57,6 +57,10 @@ if 'plan_calculated' not in st.session_state:
     st.session_state.plan_calculated = False
 if 'generate_polygons_flag' not in st.session_state:
     st.session_state.generate_polygons_flag = False
+if 'data_loaded' not in st.session_state:
+    st.session_state.data_loaded = False
+if 'plan_partial' not in st.session_state:
+    st.session_state.plan_partial = False
 
 # ==============================================
 # БОКОВАЯ ПАНЕЛЬ - НАСТРОЙКИ
@@ -85,7 +89,7 @@ with st.sidebar:
     
     st.markdown("---")
     
-    # Кнопка генерации полигонов - ДОБАВЬТЕ key
+    # Кнопка генерации полигонов
     if st.button("🗺️ Сгенерировать полигоны", type="secondary", use_container_width=True, key="generate_polygons_btn"):
         if st.session_state.plan_calculated:
             st.session_state.generate_polygons_flag = True
@@ -145,686 +149,6 @@ def get_download_link(data, filename, text, mime_type='application/vnd.openxmlfo
     b64 = base64.b64encode(data).decode()
     href = f'<a href="data:{mime_type};base64,{b64}" download="{filename}">{text}</a>'
     return href
-
-# ==============================================
-# РАЗДЕЛ ЗАГРРУЗКИ ФАЙЛОВ
-# ==============================================
-
-st.header("📤 Загрузка файла")
-
-upload_tab1, upload_tab2, upload_tab3 = st.tabs([
-    "📁 Загрузка файла", 
-    "📥 Скачать шаблон", 
-    "📋 Описание полей"
-])
-
-with upload_tab1:
-    st.subheader("Загрузите файл с данными")
-    
-    st.info("""
-    **📝 Формат файла:** 
-    - Один файл Excel с тремя вкладками: "Точки", "Аудиторы", "Факт_посещений"
-    - Скачайте шаблон справа, заполните данные и загрузите обратно
-    """)
-    
-    # Один загрузчик для всего файла - ДОБАВЬТЕ key
-    data_file = st.file_uploader(
-        "Файл с данными (Excel)", 
-        type=['xlsx', 'xls'], 
-        key="data_uploader_main",
-        help="Excel файл с тремя вкладками: Точки, Аудиторы, Факт_посещений"
-    )
-    
-    if data_file:
-        st.success(f"✅ Загружен файл: {data_file.name}")
-        
-        # Сохраняем файл в session state
-        st.session_state.data_file = data_file
-        
-        # Пробуем загрузить и проверить вкладки
-        try:
-            # Читаем названия всех листов
-            xl = pd.ExcelFile(data_file)
-            sheets = xl.sheet_names
-            
-            # Проверяем наличие необходимых листов
-            required_sheets = ['Точки', 'Аудиторы', 'Факт_посещений']
-            missing_sheets = [sheet for sheet in required_sheets if sheet not in sheets]
-            
-            if missing_sheets:
-                st.warning(f"⚠️ В файле отсутствуют вкладки: {', '.join(missing_sheets)}")
-                st.info("Убедитесь, что файл содержит вкладки с названиями: 'Точки', 'Аудиторы', 'Факт_посещений'")
-            else:
-                st.success("✅ Все необходимые вкладки найдены!")
-                
-                # Показываем предпросмотр каждой вкладки
-                with st.expander("📋 Предпросмотр данных", expanded=False):
-                    preview_tabs = st.tabs(["Точки", "Аудиторы", "Факт_посещений"])
-                    
-                    with preview_tabs[0]:
-                        points_preview = pd.read_excel(data_file, sheet_name='Точки', nrows=5)
-                        st.write(f"Точки: {len(points_preview)} строк")
-                        st.dataframe(points_preview, use_container_width=True)
-                    
-                    with preview_tabs[1]:
-                        auditors_preview = pd.read_excel(data_file, sheet_name='Аудиторы', nrows=5)
-                        st.write(f"Аудиторы: {len(auditors_preview)} строк")
-                        st.dataframe(auditors_preview, use_container_width=True)
-                    
-                    with preview_tabs[2]:
-                        visits_preview = pd.read_excel(data_file, sheet_name='Факт_посещений', nrows=5)
-                        st.write(f"Факт посещений: {len(visits_preview)} строк")
-                        st.dataframe(visits_preview, use_container_width=True)
-        
-        except Exception as e:
-            st.error(f"❌ Ошибка при чтении файла: {str(e)}")
-    
-    else:
-        st.warning("⚠️ Загрузите файл с данными для продолжения")
-
-with upload_tab2:
-    st.subheader("Шаблон файла")
-    
-    st.info("""
-    **📋 Инструкция:**
-    1. Скачайте шаблон
-    2. Заполните данные на каждой вкладке
-    3. Сохраните файл
-    4. Загрузите заполненный файл в приложение
-    """)
-    
-    # Создаем файл с тремя вкладками
-    excel_buffer = io.BytesIO()
-    
-    with pd.ExcelWriter(excel_buffer, engine='openpyxl') as writer:
-        # Вкладка 1: Точки
-        points_template = create_template_points()
-        points_template.to_excel(writer, sheet_name='Точки', index=False)
-        
-        # Вкладка 2: Аудиторы
-        auditors_template = create_template_auditors()
-        auditors_template.to_excel(writer, sheet_name='Аудиторы', index=False)
-        
-        # Вкладка 3: Факт_посещений
-        visits_template = create_template_visits()
-        visits_template.to_excel(writer, sheet_name='Факт_посещений', index=False)
-    
-    excel_data = excel_buffer.getvalue()
-    
-    # Кнопка скачивания
-    st.download_button(
-        label="📥 Скачать шаблон (Excel)",
-        data=excel_data,
-        file_name="шаблон_данных.xlsx",
-        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        use_container_width=True
-    )
-    
-    # Предпросмотр вкладок шаблона
-    st.markdown("---")
-    st.markdown("**Предпросмотр шаблона:**")
-    
-    template_tabs = st.tabs(["Точки", "Аудиторы", "Факт_посещений"])
-    
-    with template_tabs[0]:
-        st.markdown("##### Вкладка 'Точки'")
-        st.dataframe(points_template, use_container_width=True)
-        st.caption("Обязательные поля: ID_Точки, Широта, Долгота, Город, Тип")
-    
-    with template_tabs[1]:
-        st.markdown("##### Вкладка 'Аудиторы'")
-        st.dataframe(auditors_template, use_container_width=True)
-        st.caption("Обязательные поля: ID_Сотрудника, Город")
-    
-    with template_tabs[2]:
-        st.markdown("##### Вкладка 'Факт_посещений'")
-        st.dataframe(visits_template, use_container_width=True)
-        st.caption("Обязательные поля: ID_Точки, Дата_визита, ID_Сотрудника")
-    
-    st.markdown("---")
-    st.success("✅ Шаблон содержит все три вкладки в одном файле Excel")
-
-with upload_tab3:
-    st.subheader("Описание полей")
-    
-    # Используем st.tabs для трех вкладок внутри описания
-    desc_tabs = st.tabs(["Вкладка 'Точки'", "Вкладка 'Аудиторы'", "Вкладка 'Факт_посещений'"])
-    
-    with desc_tabs[0]:
-        st.markdown("""
-        ### Вкладка 'Точки'
-        
-        **Обязательные поля:**
-        - `ID_Точки` - уникальный идентификатор
-        - `Широта`, `Долгота` - координаты
-        - `Тип` - Convenience/Hypermarket/Supermarket
-        - `Город` - название города
-        
-        **Необязательные:**
-        - `Адрес` - физический адрес
-        - `Название_Точки` - название магазина
-        - `Кол-во_посещений` - план посещений (по умолчанию 1)
-        
-        **Типы точек:**
-        - `Convenience` → Мини
-        - `Hypermarket` → Гипер
-        - `Supermarket` → Супер
-        """)
-    
-    with desc_tabs[1]:
-        st.markdown("""
-        ### Вкладка 'Аудиторы'
-        
-        **Обязательные поля:**
-        - `ID_Сотрудника` - уникальный ID
-        - `Город` - город работы
-        """)
-    
-    with desc_tabs[2]:
-        st.markdown("""
-        ### Вкладка 'Факт_посещений'
-        
-        **Обязательные поля:**
-        - `ID_Точки` - должен совпадать с ID во вкладке Точки
-        - `Дата_визита` - дата посещения (дд.мм.гггг)
-        - `ID_Сотрудника` - кто совершил визит
-        
-        **Формат:**
-        - Одна строка = один визит
-        - Можно оставить пустым, если данных нет
-        """)
-
-st.markdown("---")
-
-# ==============================================
-# ФУНКЦИИ ДЛЯ ОБРАБОТКИ ДАННЫХ (ОБНОВЛЕННЫЕ)
-# ==============================================
-
-def load_and_process_data(file):
-    """Загружает и обрабатывает файл с тремя вкладками"""
-    try:
-        # Читаем все три вкладки
-        points_df = pd.read_excel(file, sheet_name='Точки')
-        auditors_df = pd.read_excel(file, sheet_name='Аудиторы')
-        
-        # Для факта посещений может быть пустая вкладка
-        try:
-            visits_df = pd.read_excel(file, sheet_name='Факт_посещений')
-        except:
-            visits_df = pd.DataFrame(columns=['ID_Точки', 'Дата_визита', 'ID_Сотрудника'])
-        
-        return points_df, auditors_df, visits_df
-        
-    except Exception as e:
-        st.error(f"❌ Ошибка при загрузке файла: {str(e)}")
-        return None, None, None
-
-# Эти функции уже есть у вас, оставьте их без изменений
-def load_and_process_points(df):
-    """Обрабатывает данные из вкладки Точки"""
-    try:
-        # Копируем DataFrame чтобы не изменять оригинал
-        points_df = df.copy()
-        
-        # Проверяем обязательные колонки
-        required_cols = ['ID_Точки', 'Широта', 'Долгота', 'Город', 'Тип']
-        missing_cols = [col for col in required_cols if col not in points_df.columns]
-        
-        if missing_cols:
-            # Попробуем найти альтернативные названия
-            column_mapping = {
-                'ID_Точки': ['ID точки', 'ID_точки', 'Point_ID'],
-                'Широта': ['Latitude', 'Lat', 'широта'],
-                'Долгота': ['Longitude', 'Lon', 'долгота'],
-                'Город': ['City', 'city', 'Город работы'],
-                'Тип': ['Type', 'Category', 'Тип точки']
-            }
-            
-            for required_col in missing_cols:
-                if required_col in column_mapping:
-                    for alt_name in column_mapping[required_col]:
-                        if alt_name in points_df.columns and required_col not in points_df.columns:
-                            points_df = points_df.rename(columns={alt_name: required_col})
-                            break
-        
-        # Проверяем еще раз
-        missing_cols = [col for col in required_cols if col not in points_df.columns]
-        if missing_cols:
-            st.error(f"❌ В файле Точки отсутствуют обязательные колонки: {', '.join(missing_cols)}")
-            return None
-        
-        # Конвертируем типы точек
-        type_mapping = {
-            'Convenience': 'Мини',
-            'convenience': 'Мини',
-            'Convenience Store': 'Мини',
-            'Convenience store': 'Мини',
-            'Hypermarket': 'Гипер',
-            'hypermarket': 'Гипер',
-            'Supermarket': 'Супер',
-            'supermarket': 'Супер',
-            'Мини': 'Мини',
-            'Гипер': 'Гипер',
-            'Супер': 'Супер'
-        }
-        
-        if 'Тип' in points_df.columns:
-            points_df['Тип'] = points_df['Тип'].map(type_mapping).fillna('Мини')
-        
-        # Обрабатываем количество посещений
-        if 'Кол-во_посещений' in points_df.columns:
-            points_df['Кол-во_посещений'] = pd.to_numeric(points_df['Кол-во_посещений'], errors='coerce').fillna(1).astype(int)
-        else:
-            points_df['Кол-во_посещений'] = 1
-        
-        # Добавляем недостающие колонки
-        if 'Название_Точки' not in points_df.columns:
-            points_df['Название_Точки'] = points_df['ID_Точки']
-        if 'Адрес' not in points_df.columns:
-            points_df['Адрес'] = ''
-        
-        # Валидация координат
-        valid_coords = points_df[
-            (points_df['Широта'] >= 41) & (points_df['Широта'] <= 82) &
-            (points_df['Долгота'] >= 19) & (points_df['Долгота'] <= 180)
-        ]
-        
-        invalid_coords = points_df[~points_df.index.isin(valid_coords.index)]
-        if len(invalid_coords) > 0:
-            st.warning(f"⚠️ Пропущено {len(invalid_coords)} точек с некорректными координатами (только Россия: широта 41-82, долгота 19-180)")
-        
-        if len(valid_coords) == 0:
-            st.error("❌ Нет точек с корректными координатами")
-            return None
-        
-        return valid_coords.reset_index(drop=True)
-        
-    except Exception as e:
-        st.error(f"❌ Ошибка при обработке данных Точки: {str(e)}")
-        return None
-
-def load_and_process_auditors(df):
-    """Обрабатывает данные из вкладки Аудиторы"""
-    try:
-        # Копируем DataFrame
-        auditors_df = df.copy()
-        
-        # Стандартизируем названия колонок
-        column_mapping = {
-            'ID_Сотрудника': ['ID Сотрудника', 'ID_сотрудника', 'Employee_ID', 'employee_id', 'Сотрудник'],
-            'Город': ['City', 'city', 'Город работы']
-        }
-        
-        for target_col, alt_names in column_mapping.items():
-            if target_col not in auditors_df.columns:
-                for alt_name in alt_names:
-                    if alt_name in auditors_df.columns:
-                        auditors_df = auditors_df.rename(columns={alt_name: target_col})
-                        break
-        
-        # Проверяем обязательные колонки
-        required_cols = ['ID_Сотрудника', 'Город']
-        missing_cols = [col for col in required_cols if col not in auditors_df.columns]
-        
-        if missing_cols:
-            st.error(f"❌ В файле Аудиторы отсутствуют обязательные колонки: {', '.join(missing_cols)}")
-            return None
-        
-        return auditors_df
-        
-    except Exception as e:
-        st.error(f"❌ Ошибка при обработке данных Аудиторы: {str(e)}")
-        return None
-
-def load_and_process_visits(df):
-    """Обрабатывает данные из вкладки Факт_посещений"""
-    try:
-        if df.empty:
-            return pd.DataFrame(columns=['ID_Точки', 'Дата_визита', 'ID_Сотрудника'])
-        
-        # Копируем DataFrame
-        visits_df = df.copy()
-        
-        # Стандартизируем названия колонок
-        column_mapping = {
-            'ID_Точки': ['ID точки', 'ID_точки', 'Point_ID'],
-            'Дата_визита': ['Дата визита', 'Дата', 'Date', 'Visit Date', 'Дата посещения'],
-            'ID_Сотрудника': ['ID Сотрудника', 'ID_сотрудника', 'Employee_ID', 'Сотрудник']
-        }
-        
-        for target_col, alt_names in column_mapping.items():
-            if target_col not in visits_df.columns:
-                for alt_name in alt_names:
-                    if alt_name in visits_df.columns:
-                        visits_df = visits_df.rename(columns={alt_name: target_col})
-                        break
-        
-        # Проверяем обязательные колонки
-        required_cols = ['ID_Точки', 'Дата_визита', 'ID_Сотрудника']
-        missing_cols = [col for col in required_cols if col not in visits_df.columns]
-        
-        if missing_cols:
-            st.warning(f"⚠️ В файле Факт_посещений отсутствуют колонки: {', '.join(missing_cols)}")
-            return pd.DataFrame(columns=required_cols)
-        
-        # Преобразуем даты (пробуем разные форматы)
-        date_formats = ['%d.%m.%Y', '%d/%m/%Y', '%d-%m-%Y', '%Y-%m-%d', '%Y/%m/%d']
-        
-        for date_format in date_formats:
-            try:
-                visits_df['Дата_визита'] = pd.to_datetime(visits_df['Дата_визита'], format=date_format, errors='raise')
-                break
-            except:
-                continue
-        else:
-            # Если ни один формат не подошел, пробуем автоопределение
-            visits_df['Дата_визита'] = pd.to_datetime(visits_df['Дата_визита'], errors='coerce')
-        
-        # Удаляем строки с невалидными датами
-        invalid_dates = visits_df['Дата_визита'].isna().sum()
-        if invalid_dates > 0:
-            st.warning(f"⚠️ Пропущено {invalid_dates} записей с невалидными датами")
-        
-        visits_df = visits_df.dropna(subset=['Дата_визита'])
-        
-        return visits_df.reset_index(drop=True)
-        
-    except Exception as e:
-        st.error(f"❌ Ошибка при обработке данных Факт_посещений: {str(e)}")
-        return pd.DataFrame(columns=['ID_Точки', 'Дата_визита', 'ID_Сотрудника'])
-
-# ==============================================
-# ФУНКЦИИ ДЛЯ РАБОТЫ С ДАТАМИ И НЕДЕЛЯМИ
-# ==============================================
-
-def get_quarter_dates(year, quarter):
-    """Возвращает даты начала и конца квартала"""
-    quarter_starts = [date(year, 1, 1), date(year, 4, 1), date(year, 7, 1), date(year, 10, 1)]
-    quarter_start = quarter_starts[quarter - 1]
-    
-    if quarter == 4:
-        quarter_end = date(year + 1, 1, 1) - timedelta(days=1)
-    else:
-        quarter_end = quarter_starts[quarter] - timedelta(days=1)
-    
-    return quarter_start, quarter_end
-
-def get_iso_week(date_obj):
-    """Возвращает ISO номер недели для даты"""
-    return date_obj.isocalendar()[1]
-
-def get_weeks_in_quarter(year, quarter):
-    """Возвращает список недель в квартале с ISO номерами"""
-    quarter_start, quarter_end = get_quarter_dates(year, quarter)
-    
-    weeks = []
-    current_date = quarter_start
-    
-    while current_date <= quarter_end:
-        week_start = current_date
-        week_end = min(current_date + timedelta(days=6), quarter_end)
-        
-        iso_week = get_iso_week(week_start)
-        
-        weeks.append({
-            'iso_week_number': iso_week,
-            'start_date': week_start,
-            'end_date': week_end,
-            'week_display': f"Неделя {iso_week} ({week_start.strftime('%d.%m')}-{week_end.strftime('%d.%m')})"
-        })
-        
-        current_date = week_end + timedelta(days=1)
-    
-    return weeks
-
-# ==============================================
-# АЛГОРИТМ РАСПРЕДЕЛЕНИЯ ТОЧЕК ПО АУДИТОРАМ
-# ==============================================
-
-def distribute_points_to_auditors(points_df, auditors_df):
-    """
-    Распределяет точки по аудиторам внутри каждого города
-    Простой алгоритм: сортировка по долготе и деление на равные части
-    """
-    
-    results = []
-    polygons_info = {}
-    
-    # Группируем по городам
-    for city in points_df['Город'].unique():
-        city_points = points_df[points_df['Город'] == city].copy()
-        city_auditors = auditors_df[auditors_df['Город'] == city]['ID_Сотрудника'].tolist()
-        
-        if len(city_auditors) == 0:
-            st.warning(f"⚠️ В городе {city} нет аудиторов")
-            continue
-        
-        if len(city_auditors) == 1:
-            # Один аудитор - все точки ему
-            auditor = city_auditors[0]
-            for _, point in city_points.iterrows():
-                results.append({
-                    'ID_Точки': point['ID_Точки'],
-                    'Аудитор': auditor,
-                    'Город': city,
-                    'Полигон': city
-                })
-            
-            # Создаем полигон для одного аудитора
-            polygons_info[f"{city}"] = {
-                'auditor': auditor,
-                'points': city_points[['ID_Точки', 'Широта', 'Долгота']].values.tolist()
-            }
-            
-        else:
-            # Несколько аудиторов - делим точки
-            # Сортируем точки по долготе (запад → восток)
-            city_points = city_points.sort_values('Долгота').reset_index(drop=True)
-            
-            # Определяем названия полигонов в зависимости от количества аудиторов
-            directions = ['Запад', 'Центр', 'Восток', 'Север', 'Юг', 
-                         'Северо-Запад', 'Северо-Восток', 'Юго-Запад', 'Юго-Восток']
-            
-            # Вычисляем индексы для деления
-            n = len(city_auditors)
-            chunk_size = len(city_points) // n
-            
-            for i, auditor in enumerate(city_auditors):
-                # Определяем диапазон точек для этого аудитора
-                start_idx = i * chunk_size
-                if i == n - 1:  # Последний аудитор получает остаток
-                    end_idx = len(city_points)
-                else:
-                    end_idx = (i + 1) * chunk_size
-                
-                auditor_points = city_points.iloc[start_idx:end_idx]
-                
-                if len(auditor_points) == 0:
-                    st.warning(f"⚠️ Аудитор {auditor} в городе {city} не получил точек")
-                    continue
-                
-                # Добавляем точки в результаты
-                for _, point in auditor_points.iterrows():
-                    polygon_name = f"{city}-{directions[i % len(directions)]}"
-                    results.append({
-                        'ID_Точки': point['ID_Точки'],
-                        'Аудитор': auditor,
-                        'Город': city,
-                        'Полигон': polygon_name
-                    })
-                
-                # Сохраняем информацию для полигона
-                polygon_name = f"{city}-{directions[i % len(directions)]}"
-                polygons_info[polygon_name] = {
-                    'auditor': auditor,
-                    'points': auditor_points[['ID_Точки', 'Широта', 'Долгота']].values.tolist()
-                }
-    
-    if not results:
-        st.error("❌ Не удалось распределить точки по аудиторам")
-        return None, None
-    
-    return pd.DataFrame(results), polygons_info
-
-# ==============================================
-# КНОПКА РАСЧЕТА ПЛАНА (полная реализация)
-# ==============================================
-
-if st.button("🚀 Рассчитать план", type="primary", use_container_width=True):
-    
-    if 'data_file' not in st.session_state or st.session_state.data_file is None:
-        st.error("⚠️ Пожалуйста, сначала загрузите файл с данными!")
-        st.stop()
-    
-    data_file = st.session_state.data_file
-    
-    try:
-        with st.spinner("🔄 Загрузка и обработка данных..."):
-            # Загружаем данные из одного файла
-            points_raw, auditors_raw, visits_raw = load_and_process_data(data_file)
-            
-            if points_raw is None or auditors_raw is None:
-                st.stop()
-            
-            # Обрабатываем каждую таблицу
-            points_df = load_and_process_points(points_raw)
-            auditors_df = load_and_process_auditors(auditors_raw)
-            visits_df = load_and_process_visits(visits_raw)
-            
-            if points_df is None or auditors_df is None:
-                st.stop()
-            
-            # Сохраняем в session state
-            st.session_state.points_df = points_df
-            st.session_state.auditors_df = auditors_df
-            st.session_state.visits_df = visits_df
-            
-            # Проверяем соответствие городов
-            cities_points = set(points_df['Город'].unique())
-            cities_auditors = set(auditors_df['Город'].unique())
-            
-            cities_without_auditors = cities_points - cities_auditors
-            cities_without_points = cities_auditors - cities_points
-            
-            if cities_without_auditors:
-                st.warning(f"⚠️ В городах {', '.join(cities_without_auditors)} нет аудиторов")
-            
-            if cities_without_points:
-                st.warning(f"⚠️ Аудиторы в городах {', '.join(cities_without_points)} не имеют точек")
-        
-        # Показываем предпросмотр данных
-        st.success("✅ Данные успешно загружены!")
-        
-        with st.expander("📋 Предпросмотр загруженных данных", expanded=False):
-            tab1, tab2, tab3 = st.tabs(["Точки", "Аудиторы", "Факт посещений"])
-            
-            with tab1:
-                st.write(f"Загружено точек: {len(points_df)}")
-                st.dataframe(points_df.head(10), use_container_width=True)
-            
-            with tab2:
-                st.write(f"Загружено аудиторов: {len(auditors_df)}")
-                st.dataframe(auditors_df.head(10), use_container_width=True)
-            
-            with tab3:
-                if not visits_df.empty:
-                    st.write(f"Загружено записей о посещениях: {len(visits_df)}")
-                    st.dataframe(visits_df.head(10), use_container_width=True)
-                else:
-                    st.info("Данные о посещениях отсутствуют")
-        
-        st.markdown("---")
-        st.header("📅 Расчет плана визитов")
-        
-        with st.spinner("🔄 Распределение точек по аудиторам..."):
-            # Распределяем точки по аудиторам
-            points_assignment_df, polygons_info = distribute_points_to_auditors(points_df, auditors_df)
-            
-            if points_assignment_df is None:
-                st.error("❌ Не удалось распределить точки по аудиторам")
-                st.stop()
-            
-            # Генерируем полигоны
-            polygons = generate_polygons(polygons_info)
-            st.session_state.polygons = polygons
-            
-            st.success(f"✅ Точки распределены по {len(polygons_info)} полигонам")
-        
-        with st.spinner("🔄 Распределение посещений по неделям..."):
-            # Распределяем посещения по неделям
-            detailed_plan_df = distribute_visits_by_weeks(
-                points_assignment_df, points_df, year, quarter, coefficients
-            )
-            
-            if detailed_plan_df.empty:
-                st.error("❌ Не удалось распределить посещения по неделям")
-                st.stop()
-            
-            st.success(f"✅ Распределено {len(detailed_plan_df)} записей по неделям")
-        
-        # Показываем краткую статистику распределения
-        col1, col2, col3, col4 = st.columns(4)
-        with col1:
-            st.metric("Всего точек", len(points_df))
-        with col2:
-            st.metric("Всего аудиторов", len(auditors_df))
-        with col3:
-            st.metric("Полигонов", len(polygons))
-        with col4:
-            total_visits = points_df['Кол-во_посещений'].sum()
-            st.metric("Всего посещений", total_visits)
-        
-        # Сохраняем предварительные результаты
-        st.session_state.polygons_info = polygons_info
-        st.session_state.points_assignment_df = points_assignment_df
-        st.session_state.detailed_plan_df = detailed_plan_df
-        st.session_state.data_loaded = True
-        st.session_state.plan_partial = True  # Отметка, что план частично рассчитан
-        
-        st.success("✅ План частично рассчитан! Готово для полного расчета со статистикой.")
-        
-    except Exception as e:
-        st.error(f"❌ Произошла ошибка: {str(e)}")
-        import traceback
-        st.error(f"Детали ошибки:\n{traceback.format_exc()}")
-
-# ==============================================
-# ИНФОРМАЦИЯ О ПРОГРЕССЕ
-# ==============================================
-
-if st.session_state.get('plan_partial', False):
-    st.markdown("---")
-    st.success("📊 **Этап 2/3 завершен:** План частично рассчитан")
-    
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        st.info("""
-        **✅ Что сделано:**
-        1. Данные загружены и обработаны
-        2. Точки распределены по аудиторам
-        3. Сгенерированы полигоны
-        4. Посещения распределены по неделям
-        """)
-    
-    with col2:
-        st.info("""
-        **⏭️ Следующие шаги (Часть 3):**
-        1. Расчет полной статистики
-        2. Создание сводных отчетов
-        3. Визуализация данных
-        4. Экспорт результатов
-        """)
-    
-    # Показываем предпросмотр распределения
-    if st.session_state.get('points_assignment_df') is not None:
-        with st.expander("👥 Предпросмотр распределения точек по аудиторам", expanded=False):
-            assignment_df = st.session_state.points_assignment_df
-            summary = assignment_df.groupby(['Город', 'Аудитор', 'Полигон']).size().reset_index(name='Количество точек')
-            st.dataframe(summary, use_container_width=True)
-
-st.markdown("---")
-st.caption("📋 **Часть 2/5:** Функции обработки данных, генерация полигонов, распределение посещений по неделям")
 
 # ==============================================
 # ФУНКЦИИ ДЛЯ ОБРАБОТКИ ДАННЫХ
@@ -1067,8 +391,100 @@ def get_weeks_in_quarter(year, quarter):
     return weeks
 
 # ==============================================
-# АЛГОРИТМ РАСПРЕДЕЛЕНИЯ ТОЧЕК ПО АУДИТОРАМ
+# ФУНКЦИИ ДЛЯ ГЕНЕРАЦИИ ПОЛИГОНОВ И РАСПРЕДЕЛЕНИЯ
 # ==============================================
+
+def generate_polygons(polygons_info):
+    """Генерирует полигоны на основе информации о точках"""
+    polygons = {}
+    
+    if not SCIPY_AVAILABLE:
+        st.warning("⚠️ Библиотека scipy не установлена. Полигоны не будут сгенерированы.")
+        return polygons
+    
+    try:
+        for polygon_name, info in polygons_info.items():
+            points = np.array(info['points'])
+            
+            if len(points) >= 3:
+                try:
+                    hull = ConvexHull(points[:, 1:3])  # Берем только координаты (широта, долгота)
+                    polygon_coords = points[hull.vertices, 1:3].tolist()
+                    
+                    # Замыкаем полигон
+                    if len(polygon_coords) > 0:
+                        polygon_coords.append(polygon_coords[0])
+                    
+                    polygons[polygon_name] = {
+                        'auditor': info['auditor'],
+                        'coordinates': polygon_coords,
+                        'points_count': len(points)
+                    }
+                except Exception as e:
+                    st.warning(f"⚠️ Не удалось создать полигон для {polygon_name}: {str(e)}")
+                    polygons[polygon_name] = {
+                        'auditor': info['auditor'],
+                        'coordinates': [],
+                        'points_count': len(points)
+                    }
+            else:
+                polygons[polygon_name] = {
+                    'auditor': info['auditor'],
+                    'coordinates': [],
+                    'points_count': len(points)
+                }
+        
+        return polygons
+    except Exception as e:
+        st.error(f"❌ Ошибка при генерации полигонов: {str(e)}")
+        return {}
+
+def distribute_visits_by_weeks(points_assignment_df, points_df, year, quarter, coefficients):
+    """Распределяет посещения по неделям"""
+    try:
+        # Создаем DataFrame для детального плана
+        detailed_plan = []
+        
+        # Получаем недели в квартале
+        weeks = get_weeks_in_quarter(year, quarter)
+        
+        # Определяем этапы (4 этапа в квартале)
+        total_weeks = len(weeks)
+        stage_size = total_weeks // 4
+        
+        # Распределяем точки
+        for _, assignment in points_assignment_df.iterrows():
+            point_id = assignment['ID_Точки']
+            auditor = assignment['Аудитор']
+            polygon_name = assignment['Полигон']
+            
+            # Находим информацию о точке
+            point_info = points_df[points_df['ID_Точки'] == point_id].iloc[0]
+            visits_needed = point_info.get('Кол-во_посещений', 1)
+            
+            # Распределяем посещения по неделям с учетом коэффициентов
+            for week_idx, week in enumerate(weeks):
+                # Определяем этап для расчета коэффициента
+                stage_idx = min(week_idx // stage_size, 3) if stage_size > 0 else 0
+                stage_coefficient = coefficients[stage_idx] if stage_idx < len(coefficients) else 1.0
+                
+                detailed_plan.append({
+                    'ID_Точки': point_id,
+                    'Аудитор': auditor,
+                    'Полигон': polygon_name,
+                    'Неделя_ISO': week['iso_week_number'],
+                    'Неделя_отчет': week['week_display'],
+                    'Дата_начала_недели': week['start_date'],
+                    'Дата_окончания_недели': week['end_date'],
+                    'Коэффициент_нагрузки': stage_coefficient,
+                    'План_посещений': 1 if week_idx < visits_needed else 0,
+                    'Город': assignment['Город']
+                })
+        
+        return pd.DataFrame(detailed_plan)
+    except Exception as e:
+        st.error(f"❌ Ошибка при распределении посещений по неделям: {str(e)}")
+        return pd.DataFrame()
 
 def distribute_points_to_auditors(points_df, auditors_df):
     """
@@ -1156,10 +572,353 @@ def distribute_points_to_auditors(points_df, auditors_df):
     return pd.DataFrame(results), polygons_info
 
 # ==============================================
+# РАЗДЕЛ ЗАГРУЗКИ ФАЙЛОВ
+# ==============================================
+
+st.header("📤 Загрузка файла")
+
+upload_tab1, upload_tab2, upload_tab3 = st.tabs([
+    "📁 Загрузка файла", 
+    "📥 Скачать шаблон", 
+    "📋 Описание полей"
+])
+
+with upload_tab1:
+    st.subheader("Загрузите файл с данными")
+    
+    st.info("""
+    **📝 Формат файла:** 
+    - Один файл Excel с тремя вкладками: "Точки", "Аудиторы", "Факт_посещений"
+    - Скачайте шаблон справа, заполните данные и загрузите обратно
+    """)
+    
+    # Один загрузчик для всего файла
+    data_file = st.file_uploader(
+        "Файл с данными (Excel)", 
+        type=['xlsx', 'xls'], 
+        key="data_uploader_main",
+        help="Excel файл с тремя вкладками: Точки, Аудиторы, Факт_посещений"
+    )
+    
+    if data_file:
+        st.success(f"✅ Загружен файл: {data_file.name}")
+        
+        # Сохраняем файл в session state
+        st.session_state.data_file = data_file
+        
+        # Пробуем загрузить и проверить вкладки
+        try:
+            # Читаем названия всех листов
+            xl = pd.ExcelFile(data_file)
+            sheets = xl.sheet_names
+            
+            # Проверяем наличие необходимых листов
+            required_sheets = ['Точки', 'Аудиторы', 'Факт_посещений']
+            missing_sheets = [sheet for sheet in required_sheets if sheet not in sheets]
+            
+            if missing_sheets:
+                st.warning(f"⚠️ В файле отсутствуют вкладки: {', '.join(missing_sheets)}")
+                st.info("Убедитесь, что файл содержит вкладки с названиями: 'Точки', 'Аудиторы', 'Факт_посещений'")
+            else:
+                st.success("✅ Все необходимые вкладки найдены!")
+                
+                # Показываем предпросмотр каждой вкладки
+                with st.expander("📋 Предпросмотр данных", expanded=False):
+                    preview_tabs = st.tabs(["Точки", "Аудиторы", "Факт_посещений"])
+                    
+                    with preview_tabs[0]:
+                        points_preview = pd.read_excel(data_file, sheet_name='Точки', nrows=5)
+                        st.write(f"Точки: {len(points_preview)} строк")
+                        st.dataframe(points_preview, use_container_width=True)
+                    
+                    with preview_tabs[1]:
+                        auditors_preview = pd.read_excel(data_file, sheet_name='Аудиторы', nrows=5)
+                        st.write(f"Аудиторы: {len(auditors_preview)} строк")
+                        st.dataframe(auditors_preview, use_container_width=True)
+                    
+                    with preview_tabs[2]:
+                        visits_preview = pd.read_excel(data_file, sheet_name='Факт_посещений', nrows=5)
+                        st.write(f"Факт посещений: {len(visits_preview)} строк")
+                        st.dataframe(visits_preview, use_container_width=True)
+        
+        except Exception as e:
+            st.error(f"❌ Ошибка при чтении файла: {str(e)}")
+    
+    else:
+        st.warning("⚠️ Загрузите файл с данными для продолжения")
+
+with upload_tab2:
+    st.subheader("Шаблон файла")
+    
+    st.info("""
+    **📋 Инструкция:**
+    1. Скачайте шаблон
+    2. Заполните данные на каждой вкладке
+    3. Сохраните файл
+    4. Загрузите заполненный файл в приложение
+    """)
+    
+    # Создаем файл с тремя вкладками
+    excel_buffer = io.BytesIO()
+    
+    with pd.ExcelWriter(excel_buffer, engine='openpyxl') as writer:
+        # Вкладка 1: Точки
+        points_template = create_template_points()
+        points_template.to_excel(writer, sheet_name='Точки', index=False)
+        
+        # Вкладка 2: Аудиторы
+        auditors_template = create_template_auditors()
+        auditors_template.to_excel(writer, sheet_name='Аудиторы', index=False)
+        
+        # Вкладка 3: Факт_посещений
+        visits_template = create_template_visits()
+        visits_template.to_excel(writer, sheet_name='Факт_посещений', index=False)
+    
+    excel_data = excel_buffer.getvalue()
+    
+    # Кнопка скачивания
+    st.download_button(
+        label="📥 Скачать шаблон (Excel)",
+        data=excel_data,
+        file_name="шаблон_данных.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        use_container_width=True
+    )
+    
+    # Предпросмотр вкладок шаблона
+    st.markdown("---")
+    st.markdown("**Предпросмотр шаблона:**")
+    
+    template_tabs = st.tabs(["Точки", "Аудиторы", "Факт_посещений"])
+    
+    with template_tabs[0]:
+        st.markdown("##### Вкладка 'Точки'")
+        st.dataframe(points_template, use_container_width=True)
+        st.caption("Обязательные поля: ID_Точки, Широта, Долгота, Город, Тип")
+    
+    with template_tabs[1]:
+        st.markdown("##### Вкладка 'Аудиторы'")
+        st.dataframe(auditors_template, use_container_width=True)
+        st.caption("Обязательные поля: ID_Сотрудника, Город")
+    
+    with template_tabs[2]:
+        st.markdown("##### Вкладка 'Факт_посещений'")
+        st.dataframe(visits_template, use_container_width=True)
+        st.caption("Обязательные поля: ID_Точки, Дата_визита, ID_Сотрудника")
+    
+    st.markdown("---")
+    st.success("✅ Шаблон содержит все три вкладки в одном файле Excel")
+
+with upload_tab3:
+    st.subheader("Описание полей")
+    
+    # Используем st.tabs для трех вкладок внутри описания
+    desc_tabs = st.tabs(["Вкладка 'Точки'", "Вкладка 'Аудиторы'", "Вкладка 'Факт_посещений'"])
+    
+    with desc_tabs[0]:
+        st.markdown("""
+        ### Вкладка 'Точки'
+        
+        **Обязательные поля:**
+        - `ID_Точки` - уникальный идентификатор
+        - `Широта`, `Долгота` - координаты
+        - `Тип` - Convenience/Hypermarket/Supermarket
+        - `Город` - название города
+        
+        **Необязательные:**
+        - `Адрес` - физический адрес
+        - `Название_Точки` - название магазина
+        - `Кол-во_посещений` - план посещений (по умолчанию 1)
+        
+        **Типы точек:**
+        - `Convenience` → Мини
+        - `Hypermarket` → Гипер
+        - `Supermarket` → Супер
+        """)
+    
+    with desc_tabs[1]:
+        st.markdown("""
+        ### Вкладка 'Аудиторы'
+        
+        **Обязательные поля:**
+        - `ID_Сотрудника` - уникальный ID
+        - `Город` - город работы
+        """)
+    
+    with desc_tabs[2]:
+        st.markdown("""
+        ### Вкладка 'Факт_посещений'
+        
+        **Обязательные поля:**
+        - `ID_Точки` - должен совпадать с ID во вкладке Точки
+        - `Дата_визита` - дата посещения (дд.мм.гггг)
+        - `ID_Сотрудника` - кто совершил визит
+        
+        **Формат:**
+        - Одна строка = один визит
+        - Можно оставить пустым, если данных нет
+        """)
+
+st.markdown("---")
+
+# ==============================================
+# КНОПКА РАСЧЕТА ПЛАНА
+# ==============================================
+
+if st.button("🚀 Рассчитать план", type="primary", use_container_width=True, key="calculate_plan_btn"):
+    
+    if 'data_file' not in st.session_state or st.session_state.data_file is None:
+        st.error("⚠️ Пожалуйста, сначала загрузите файл с данными!")
+        st.stop()
+    
+    data_file = st.session_state.data_file
+    
+    try:
+        with st.spinner("🔄 Загрузка и обработка данных..."):
+            # Загружаем данные из одного файла
+            points_raw, auditors_raw, visits_raw = load_and_process_data(data_file)
+            
+            if points_raw is None or auditors_raw is None:
+                st.stop()
+            
+            # Обрабатываем каждую таблицу
+            points_df = load_and_process_points(points_raw)
+            auditors_df = load_and_process_auditors(auditors_raw)
+            visits_df = load_and_process_visits(visits_raw)
+            
+            if points_df is None or auditors_df is None:
+                st.stop()
+            
+            # Сохраняем в session state
+            st.session_state.points_df = points_df
+            st.session_state.auditors_df = auditors_df
+            st.session_state.visits_df = visits_df
+            
+            # Проверяем соответствие городов
+            cities_points = set(points_df['Город'].unique())
+            cities_auditors = set(auditors_df['Город'].unique())
+            
+            cities_without_auditors = cities_points - cities_auditors
+            cities_without_points = cities_auditors - cities_points
+            
+            if cities_without_auditors:
+                st.warning(f"⚠️ В городах {', '.join(cities_without_auditors)} нет аудиторов")
+            
+            if cities_without_points:
+                st.warning(f"⚠️ Аудиторы в городах {', '.join(cities_without_points)} не имеют точек")
+        
+        # Показываем предпросмотр данных
+        st.success("✅ Данные успешно загружены!")
+        
+        with st.expander("📋 Предпросмотр загруженных данных", expanded=False):
+            tab1, tab2, tab3 = st.tabs(["Точки", "Аудиторы", "Факт посещений"])
+            
+            with tab1:
+                st.write(f"Загружено точек: {len(points_df)}")
+                st.dataframe(points_df.head(10), use_container_width=True)
+            
+            with tab2:
+                st.write(f"Загружено аудиторов: {len(auditors_df)}")
+                st.dataframe(auditors_df.head(10), use_container_width=True)
+            
+            with tab3:
+                if not visits_df.empty:
+                    st.write(f"Загружено записей о посещениях: {len(visits_df)}")
+                    st.dataframe(visits_df.head(10), use_container_width=True)
+                else:
+                    st.info("Данные о посещениях отсутствуют")
+        
+        st.markdown("---")
+        st.header("📅 Расчет плана визитов")
+        
+        with st.spinner("🔄 Распределение точек по аудиторам..."):
+            # Распределяем точки по аудиторам
+            points_assignment_df, polygons_info = distribute_points_to_auditors(points_df, auditors_df)
+            
+            if points_assignment_df is None:
+                st.error("❌ Не удалось распределить точки по аудиторам")
+                st.stop()
+            
+            # Генерируем полигоны
+            polygons = generate_polygons(polygons_info)
+            st.session_state.polygons = polygons
+            
+            st.success(f"✅ Точки распределены по {len(polygons_info)} полигонам")
+        
+        with st.spinner("🔄 Распределение посещений по неделям..."):
+            # Распределяем посещения по неделям
+            detailed_plan_df = distribute_visits_by_weeks(
+                points_assignment_df, points_df, year, quarter, coefficients
+            )
+            
+            if detailed_plan_df.empty:
+                st.error("❌ Не удалось распределить посещения по неделям")
+                st.stop()
+            
+            st.success(f"✅ Распределено {len(detailed_plan_df)} записей по неделям")
+        
+        # Показываем краткую статистику распределения
+        col1, col2, col3, col4 = st.columns(4)
+        with col1:
+            st.metric("Всего точек", len(points_df))
+        with col2:
+            st.metric("Всего аудиторов", len(auditors_df))
+        with col3:
+            st.metric("Полигонов", len(polygons))
+        with col4:
+            total_visits = points_df['Кол-во_посещений'].sum()
+            st.metric("Всего посещений", total_visits)
+        
+        # Сохраняем предварительные результаты
+        st.session_state.polygons_info = polygons_info
+        st.session_state.points_assignment_df = points_assignment_df
+        st.session_state.detailed_plan_df = detailed_plan_df
+        st.session_state.data_loaded = True
+        st.session_state.plan_partial = True  # Отметка, что план частично рассчитан
+        
+        st.success("✅ План частично рассчитан! Готово для полного расчета со статистикой.")
+        
+    except Exception as e:
+        st.error(f"❌ Произошла ошибка: {str(e)}")
+        import traceback
+        st.error(f"Детали ошибки:\n{traceback.format_exc()}")
+
+# ==============================================
 # ИНФОРМАЦИЯ О ПРОГРЕССЕ
 # ==============================================
 
-if st.session_state.get('data_loaded', False):
+if st.session_state.get('plan_partial', False):
+    st.markdown("---")
+    st.success("📊 **Этап 2/3 завершен:** План частично рассчитан")
+    
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        st.info("""
+        **✅ Что сделано:**
+        1. Данные загружены и обработаны
+        2. Точки распределены по аудиторам
+        3. Сгенерированы полигоны
+        4. Посещения распределены по неделям
+        """)
+    
+    with col2:
+        st.info("""
+        **⏭️ Следующие шаги (Часть 3):**
+        1. Расчет полной статистики
+        2. Создание сводных отчетов
+        3. Визуализация данных
+        4. Экспорт результатов
+        """)
+    
+    # Показываем предпросмотр распределения
+    if st.session_state.get('points_assignment_df') is not None:
+        with st.expander("👥 Предпросмотр распределения точек по аудиторам", expanded=False):
+            assignment_df = st.session_state.points_assignment_df
+            summary = assignment_df.groupby(['Город', 'Аудитор', 'Полигон']).size().reset_index(name='Количество точек')
+            st.dataframe(summary, use_container_width=True)
+
+elif st.session_state.get('data_loaded', False):
     st.markdown("---")
     st.success("📊 **Этап 1/3 завершен:** Данные загружены и распределены по аудиторам")
     
@@ -1184,7 +943,4 @@ if st.session_state.get('data_loaded', False):
         """)
 
 st.markdown("---")
-
-st.caption("📋 **Часть 2/5:** Функции обработки данных, работа с датами, распределение точек по аудиторам")
-
-
+st.caption("📋 **Часть 2/5:** Функции обработки данных, генерация полигонов, распределение посещений по неделям")
