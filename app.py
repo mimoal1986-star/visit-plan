@@ -1,3 +1,11 @@
+# Картография
+try:
+    import folium
+    from streamlit_folium import folium_static
+    FOLIUM_AVAILABLE = True
+except ImportError:
+    FOLIUM_AVAILABLE = False
+    # st.sidebar.warning("⚠️ Для карты установите: pip install folium streamlit-folium")
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -1306,6 +1314,178 @@ elif st.session_state.get('data_loaded', False):
 
 st.markdown("---")
 st.caption("📋 **Часть 2/5:** Функции обработки данных, генерация полигонов, распределение посещений по неделям")
+
+# ==============================================
+# ВКЛАДКИ С РЕЗУЛЬТАТАМИ
+# ==============================================
+
+if st.session_state.plan_calculated:
+    st.markdown("---")
+    st.header("📊 Результаты расчета")
+    
+    # Проверка доступности folium
+    try:
+        import folium
+        from streamlit_folium import folium_static
+        FOLIUM_AVAILABLE = True
+    except ImportError:
+        FOLIUM_AVAILABLE = False
+    
+    # Создаем вкладки
+    results_tabs = st.tabs([
+        "📊 Статистика по городам",
+        "📋 Сводный план",
+        "📍 Детализация",
+        "📈 Диаграммы",
+        "🗺️ Карта полигонов"
+    ])
+    
+    # ВКЛАДКА 1: Статистика по городам
+    with results_tabs[0]:
+        st.subheader("📊 Статистика по городам")
+        
+        if st.session_state.city_stats_df is not None:
+            city_stats = st.session_state.city_stats_df.copy()
+            
+            # Переименовываем колонки для отображения
+            display_cols = ['Город', 'Всего_точек', 'План_посещений', 'Факт_посещений', '%_выполнения']
+            display_df = city_stats[display_cols].copy()
+            display_df = display_df.rename(columns={
+                'Всего_точек': 'Всего точек',
+                'План_посещений': 'План посещений',
+                'Факт_посещений': 'Факт посещений',
+                '%_выполнения': '% выполнения'
+            })
+            
+            st.dataframe(display_df, use_container_width=True, hide_index=True)
+            
+            # Выгрузка в Excel
+            excel_buffer = io.BytesIO()
+            with pd.ExcelWriter(excel_buffer, engine='openpyxl') as writer:
+                display_df.to_excel(writer, sheet_name='Статистика по городам', index=False)
+            
+            excel_data = excel_buffer.getvalue()
+            b64 = base64.b64encode(excel_data).decode()
+            href = f'<a href="data:application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;base64,{b64}" download="статистика_городов.xlsx">📥 Скачать Excel</a>'
+            st.markdown(href, unsafe_allow_html=True)
+    
+    # ВКЛАДКА 2: Сводный план
+    with results_tabs[1]:
+        st.subheader("📋 Сводный план посещений")
+        
+        if st.session_state.summary_df is not None:
+            summary_df = st.session_state.summary_df.copy()
+            
+            # Простая таблица без фильтров для начала
+            if not summary_df.empty:
+                display_df = summary_df.copy()
+                
+                # Форматируем даты
+                display_df['Дата_начала'] = pd.to_datetime(display_df['Дата_начала']).dt.strftime('%d.%m.%Y')
+                display_df['Дата_окончания'] = pd.to_datetime(display_df['Дата_окончания']).dt.strftime('%d.%m.%Y')
+                
+                # Переименовываем колонки
+                display_df = display_df.rename(columns={
+                    'ISO_Неделя': 'Неделя',
+                    'Дата_начала': 'Начало недели',
+                    'Дата_окончания': 'Конец недели',
+                    'План_посещений': 'План',
+                    'Факт_посещений': 'Факт',
+                    '%_выполнения': '% выполнения'
+                })
+                
+                st.dataframe(display_df, use_container_width=True, height=400)
+            else:
+                st.info("Нет данных для отображения")
+    
+    # ВКЛАДКА 3: Детализация
+    with results_tabs[2]:
+        st.subheader("📍 Детализация посещений")
+        
+        if st.session_state.details_df is not None:
+            details_df = st.session_state.details_df.copy()
+            
+            # Простая таблица
+            if not details_df.empty:
+                display_df = details_df[['Город', 'Полигон', 'Аудитор', 'ISO_Неделя', 
+                                        'ID_Точки', 'Название_Точки', 'Тип', 
+                                        'План_посещений', 'Факт_посещений', 'План_выполнен']].copy()
+                
+                st.dataframe(display_df, use_container_width=True, height=400)
+            else:
+                st.info("Нет данных для отображения")
+    
+    # ВКЛАДКА 4: Диаграммы
+    with results_tabs[3]:
+        st.subheader("📈 Диаграммы и статистика")
+        
+        # Простая диаграмма выполнения плана
+        if st.session_state.city_stats_df is not None:
+            city_stats = st.session_state.city_stats_df.copy()
+            
+            # Создаем график
+            fig = px.bar(city_stats, 
+                        x='Город', 
+                        y='%_выполнения',
+                        title='% выполнения плана по городам',
+                        color='%_выполнения',
+                        color_continuous_scale='RdYlGn')
+            
+            fig.update_layout(height=400)
+            st.plotly_chart(fig, use_container_width=True)
+    
+    # ВКЛАДКА 5: Карта полигонов
+    with results_tabs[4]:
+        st.subheader("🗺️ Карта полигонов аудиторов")
+        
+        if st.session_state.polygons is not None and len(st.session_state.polygons) > 0:
+            polygons = st.session_state.polygons
+            
+            if not FOLIUM_AVAILABLE:
+                st.warning("""
+                ⚠️ Для отображения карты установите библиотеки:
+                ```
+                pip install folium streamlit-folium
+                ```
+                После установки перезапустите приложение.
+                """)
+                
+                # Показываем таблицу с полигонами как альтернативу
+                poly_data = []
+                for poly_name, poly_info in polygons.items():
+                    poly_data.append({
+                        'Полигон': poly_name,
+                        'Аудитор': poly_info.get('auditor', 'Неизвестно'),
+                        'Количество точек': len(poly_info.get('points', [])),
+                        'Город': poly_info.get('city', 'Неизвестно')
+                    })
+                
+                if poly_data:
+                    st.dataframe(pd.DataFrame(poly_data), use_container_width=True)
+            else:
+                # Код для отображения карты с folium
+                if st.session_state.points_df is not None:
+                    points_df = st.session_state.points_df
+                    
+                    # Находим центр карты
+                    center_lat = points_df['Широта'].mean()
+                    center_lon = points_df['Долгота'].mean()
+                    
+                    m = folium.Map(location=[center_lat, center_lon], zoom_start=10)
+                    
+                    # Простой код для отображения точек
+                    for _, point in points_df.iterrows():
+                        folium.CircleMarker(
+                            location=[point['Широта'], point['Долгота']],
+                            radius=5,
+                            popup=f"{point['ID_Точки']}: {point['Название_Точки']}",
+                            color='blue',
+                            fill=True
+                        ).add_to(m)
+                    
+                    folium_static(m, width=1200, height=600)
+        else:
+            st.info("Полигоны еще не сгенерированы. Нажмите кнопку 'Рассчитать план'")
 
 
 
