@@ -523,7 +523,7 @@ def distribute_points_to_auditors(points_df, auditors_df):
     # ПРОВЕРКА: если нет данных - возвращаем пустые результаты
     if points_df is None or points_df.empty:
         st.error("❌ Нет данных о точках для распределения")
-        return pd.DataFrame(), {}  # ВАЖНО: возвращаем пустые значения, а не None!
+        return None, None  # Возвращаем None, а не пустые значения
     
     results = []
     polygons_info = {}
@@ -601,7 +601,7 @@ def distribute_points_to_auditors(points_df, auditors_df):
     # ВАЖНОЕ ИЗМЕНЕНИЕ: если нет результатов, возвращаем пустые структуры
     if not results:
         st.warning("⚠️ Не удалось распределить точки по аудиторам (нет подходящих городов)")
-        return pd.DataFrame(), {}  # Пустые значения вместо None
+        return None, None  # Возвращаем None, чтобы обработчик понял ошибку
     
     return pd.DataFrame(results), polygons_info
 # ==============================================
@@ -828,82 +828,6 @@ def calculate_statistics(points_df, visits_df, detailed_plan_df, year, quarter):
     
     return city_stats_df, type_stats_df, summary_df, detailed_with_fact
     
-    # Группируем по городам
-    for city in points_df['Город'].unique():
-        city_points = points_df[points_df['Город'] == city].copy()
-        city_auditors = auditors_df[auditors_df['Город'] == city]['ID_Сотрудника'].tolist()
-        
-        if len(city_auditors) == 0:
-            st.warning(f"⚠️ В городе {city} нет аудиторов")
-            continue
-        
-        if len(city_auditors) == 1:
-            # Один аудитор - все точки ему
-            auditor = city_auditors[0]
-            for _, point in city_points.iterrows():
-                results.append({
-                    'ID_Точки': point['ID_Точки'],
-                    'Аудитор': auditor,
-                    'Город': city,
-                    'Полигон': city
-                })
-            
-            # Создаем полигон для одного аудитора
-            polygons_info[f"{city}"] = {
-                'auditor': auditor,
-                'points': city_points[['ID_Точки', 'Широта', 'Долгота']].values.tolist()
-            }
-            
-        else:
-            # Несколько аудиторов - делим точки
-            # Сортируем точки по долготе (запад → восток)
-            city_points = city_points.sort_values('Долгота').reset_index(drop=True)
-            
-            # Определяем названия полигонов в зависимости от количества аудиторов
-            directions = ['Запад', 'Центр', 'Восток', 'Север', 'Юг', 
-                         'Северо-Запад', 'Северо-Восток', 'Юго-Запад', 'Юго-Восток']
-            
-            # Вычисляем индексы для деления
-            n = len(city_auditors)
-            chunk_size = len(city_points) // n
-            
-            for i, auditor in enumerate(city_auditors):
-                # Определяем диапазон точек для этого аудитора
-                start_idx = i * chunk_size
-                if i == n - 1:  # Последний аудитор получает остаток
-                    end_idx = len(city_points)
-                else:
-                    end_idx = (i + 1) * chunk_size
-                
-                auditor_points = city_points.iloc[start_idx:end_idx]
-                
-                if len(auditor_points) == 0:
-                    st.warning(f"⚠️ Аудитор {auditor} в городе {city} не получил точек")
-                    continue
-                
-                # Добавляем точки в результаты
-                for _, point in auditor_points.iterrows():
-                    polygon_name = f"{city}-{directions[i % len(directions)]}"
-                    results.append({
-                        'ID_Точки': point['ID_Точки'],
-                        'Аудитор': auditor,
-                        'Город': city,
-                        'Полигон': polygon_name
-                    })
-                
-                # Сохраняем информацию для полигона
-                polygon_name = f"{city}-{directions[i % len(directions)]}"
-                polygons_info[polygon_name] = {
-                    'auditor': auditor,
-                    'points': auditor_points[['ID_Точки', 'Широта', 'Долгота']].values.tolist()
-                }
-    
-    if not results:
-        st.error("❌ Не удалось распределить точки по аудиторам")
-        return None, None
-    
-    return pd.DataFrame(results), polygons_info
-
 # ==============================================
 # РАЗДЕЛ ЗАГРУЗКИ ФАЙЛОВ
 # ==============================================
@@ -1325,6 +1249,7 @@ elif st.session_state.get('data_loaded', False):
 
 st.markdown("---")
 st.caption("📋 **Часть 2/5:** Функции обработки данных, генерация полигонов, распределение посещений по неделям")
+
 
 
 
