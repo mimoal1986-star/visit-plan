@@ -403,11 +403,36 @@ def create_simple_polygon(points):
     if len(points) == 0:
         return []
     
-    # Берем только координаты
+    # ИСПРАВЛЕНИЕ: безопасное извлечение координат из разных форматов
+    coords = []
+    
     if isinstance(points, np.ndarray):
-        coords = points[:, 1:3].tolist()
+        # Формат numpy array
+        if points.ndim == 2 and points.shape[1] >= 3:
+            # Предполагаем формат: [ID, широта, долгота, ...]
+            for point in points:
+                if len(point) >= 3:
+                    try:
+                        lat = float(point[1])
+                        lon = float(point[2])
+                        coords.append([lat, lon])
+                    except (ValueError, TypeError, IndexError):
+                        continue
     else:
-        coords = [[p[1], p[2]] for p in points]  # [широта, долгота]
+        # Формат списка/кортежа
+        for point in points:
+            if isinstance(point, (list, tuple, np.ndarray)) and len(point) >= 3:
+                try:
+                    # Формат: [ID, широта, долгота]
+                    lat = float(point[1])
+                    lon = float(point[2])
+                    coords.append([lat, lon])
+                except (ValueError, TypeError, IndexError):
+                    continue
+    
+    # ИСПРАВЛЕНИЕ: если не удалось извлечь координаты
+    if not coords:
+        return []
     
     if len(coords) == 1:
         # Одна точка - возвращаем пустой список
@@ -1267,6 +1292,7 @@ elif st.session_state.get('data_loaded', False):
 
 st.markdown("---")
 st.caption("📋 **Часть 2/5:** Функции обработки данных, генерация полигонов, распределение посещений по неделям")
+
 
 
 
