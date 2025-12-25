@@ -607,51 +607,51 @@ def distribute_points_to_auditors(points_df, auditors_df):
 
 def generate_convex_hull(points_coords):
     """Генерирует выпуклую оболочку для набора точек"""
-    global SCIPY_AVAILABLE  # ДОБАВЛЯЕМ ЭТУ СТРОКУ
+    global SCIPY_AVAILABLE
     
     if len(points_coords) < 3:
         # Для 1-2 точек создаем искусственный полигон вокруг них
         if len(points_coords) == 0:
             return []
         elif len(points_coords) == 1:
-    # ИСПРАВЛЕНИЕ: points_coords[0] может быть кортежем или списком
-    	point = points_coords[0]
-    	if isinstance(point, (list, tuple)) and len(point) >= 2:
-        lat, lon = point[0], point[1]
-    else:
-        # Запасной вариант
-        lat, lon = 55.7558, 37.6173  # Координаты Москвы по умолчанию
-    
-    return [
-        [lat - 0.001, lon - 0.001],
-        [lat - 0.001, lon + 0.001],
-        [lat + 0.001, lon + 0.001],
-        [lat + 0.001, lon - 0.001],
-        [lat - 0.001, lon - 0.001]
-    ]
+            # ИСПРАВЛЕНИЕ: points_coords[0] может быть кортежем или списком
+            point = points_coords[0]
+            if isinstance(point, (list, tuple)) and len(point) >= 2:
+                lat, lon = point[0], point[1]
+            else:
+                # Запасной вариант
+                lat, lon = 55.7558, 37.6173  # Координаты Москвы по умолчанию
+            
+            return [
+                [lat - 0.001, lon - 0.001],
+                [lat - 0.001, lon + 0.001],
+                [lat + 0.001, lon + 0.001],
+                [lat + 0.001, lon - 0.001],
+                [lat - 0.001, lon - 0.001]
+            ]
         elif len(points_coords) == 2:
-    # ИСПРАВЛЕНИЕ: правильное извлечение координат
-    	point1 = points_coords[0]
-    	point2 = points_coords[1]
-    
-    	if isinstance(point1, (list, tuple)) and len(point1) >= 2:
-        lat1, lon1 = point1[0], point1[1]
-    else:
-        lat1, lon1 = 55.7558, 37.6173
-        
-    if isinstance(point2, (list, tuple)) and len(point2) >= 2:
-        lat2, lon2 = point2[0], point2[1]
-    else:
-        lat2, lon2 = 55.7658, 37.6273
-    
-    # Создаем прямоугольник между двумя точками
-    return [
-        [min(lat1, lat2) - 0.001, min(lon1, lon2) - 0.001],
-        [min(lat1, lat2) - 0.001, max(lon1, lon2) + 0.001],
-        [max(lat1, lat2) + 0.001, max(lon1, lon2) + 0.001],
-        [max(lat1, lat2) + 0.001, min(lon1, lon2) - 0.001],
-        [min(lat1, lat2) - 0.001, min(lon1, lon2) - 0.001]
-    ]
+            # ИСПРАВЛЕНИЕ: правильное извлечение координат
+            point1 = points_coords[0]
+            point2 = points_coords[1]
+            
+            if isinstance(point1, (list, tuple)) and len(point1) >= 2:
+                lat1, lon1 = point1[0], point1[1]
+            else:
+                lat1, lon1 = 55.7558, 37.6173
+                
+            if isinstance(point2, (list, tuple)) and len(point2) >= 2:
+                lat2, lon2 = point2[0], point2[1]
+            else:
+                lat2, lon2 = 55.7658, 37.6273
+            
+            # Создаем прямоугольник между двумя точками
+            return [
+                [min(lat1, lat2) - 0.001, min(lon1, lon2) - 0.001],
+                [min(lat1, lat2) - 0.001, max(lon1, lon2) + 0.001],
+                [max(lat1, lat2) + 0.001, max(lon1, lon2) + 0.001],
+                [max(lat1, lat2) + 0.001, min(lon1, lon2) - 0.001],
+                [min(lat1, lat2) - 0.001, min(lon1, lon2) - 0.001]
+            ]
     
     try:
         if SCIPY_AVAILABLE:
@@ -1840,4 +1840,5 @@ st.caption(
     - Статистика план/факт/выполнение  
     - Выгрузка в Excel и KML форматы
     """
+
 )
