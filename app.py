@@ -1606,111 +1606,110 @@ if st.session_state.plan_calculated:
                 # Отображаем карту
                 folium_static(m, width=900, height=600)
                 
-                # Кнопка выгрузки KML
-                st.markdown("---")
-                st.subheader("📤 Выгрузка полигонов")
-                
-                col1, col2 = st.columns(2)
-                
-                with col1:
-                    if st.button("🗺️ Выгрузить KML файл", type="primary", use_container_width=True):
-                     try:
-    import simplekml  # Добавьте импорт сюда
-    # Создаем KML файл
-    kml = simplekml.Kml()
-    
-    for polygon_name, polygon_data in polygons.items():
-        # Полигон
-        pol = kml.newpolygon(name=polygon_name)
-        pol.outerboundaryis = polygon_data['coordinates']
-        
-        # Цвет из палитры
-        color_idx = list(polygons.keys()).index(polygon_name) % len(colors)
-        color_hex = colors[color_idx].lstrip('#')
-        
-        # Конвертируем цвет для KML (формат aabbggrr)
-        if len(color_hex) == 6:
-            # Из RRGGBB в AABBGGRR
-            r = int(color_hex[0:2], 16)
-            g = int(color_hex[2:4], 16)
-            b = int(color_hex[4:6], 16)
-            kml_color = simplekml.Color.rgb(b, g, r, alpha=128)  # KML использует ABGR
-        else:
-            kml_color = simplekml.Color.red
-        
-        pol.style.polystyle.color = kml_color
-        
-        # Описание
-        pol.description = f"""
-        <![CDATA[
-        <h3>{polygon_name}</h3>
-        <p><b>Аудитор:</b> {polygon_data['auditor']}</p>
-        <p><b>Город:</b> {polygon_data['city']}</p>
-        <p><b>Количество точек:</b> {len(polygon_data['points'])}</p>
-        ]]>
-        """
-        
-        # Добавляем точки в полигон
-        folder = kml.newfolder(name=f"Точки полигона {polygon_name}")
-        for point in polygon_data['points']:
-            point_id, lat, lon = point
-            
-            # Находим информацию о точке
-            point_info = points_df[points_df['ID_Точки'] == point_id]
-            if not point_info.empty:
-                point_name = point_info['Название_Точки'].iloc[0]
-                point_address = point_info['Адрес'].iloc[0] if pd.notna(point_info['Адрес'].iloc[0]) and point_info['Адрес'].iloc[0] != '' else "Адрес не указан"
-                point_type = point_info['Тип'].iloc[0]
-            else:
-                point_name = point_id
-                point_address = "Информация не найдена"
-                point_type = "Неизвестно"
-            
-            pnt = folder.newpoint(name=point_name)
-            pnt.coords = [(lon, lat)]
-            pnt.description = f"""
-            <![CDATA[
-            <h4>{point_name}</h4>
-            <p><b>ID:</b> {point_id}</p>
-            <p><b>Адрес:</b> {point_address}</p>
-            <p><b>Тип:</b> {point_type}</p>
-            <p><b>Аудитор:</b> {polygon_data['auditor']}</p>
-            ]]>
-            """
-            pnt.style.iconstyle.color = kml_color
-    
-    # Сохраняем KML
-    # ИСПРАВЛЕНИЕ: Сохраняем KML в буфер памяти вместо файла
-    import tempfile
-    import os
-    
-    with tempfile.NamedTemporaryFile(mode='wb', suffix='.kml', delete=False) as tmp_file:
-        kml.save(tmp_file.name)
-        tmp_file_path = tmp_file.name
+  # Кнопка выгрузки KML
+st.markdown("---")
+st.subheader("📤 Выгрузка полигонов")
 
-    # Читаем из временного файла
-    with open(tmp_file_path, "rb") as f:
-        kml_data = f.read()
+col1, col2 = st.columns(2)
 
-    # Удаляем временный файл
-    try:
-        os.unlink(tmp_file_path)
-    except:
-        pass
-    
-    b64 = base64.b64encode(kml_data).decode()
-    href = f'<a href="data:application/vnd.google-earth.kml+xml;base64,{b64}" download="полигоны_аудиторов.kml">📥 Скачать KML файл</a>'
-    st.markdown(href, unsafe_allow_html=True)
-    st.success("✅ KML файл успешно сгенерирован!")
-    
-except Exception as e:
-    st.error(f"❌ Ошибка при генерации KML: {str(e)}")
-                
-                with col2:
-                    if st.button("🔄 Обновить полигоны", type="secondary", use_container_width=True):
-                        st.session_state.generate_polygons_flag = True
-                        st.rerun()
+with col1:
+    if st.button("🗺️ Выгрузить KML файл", type="primary", use_container_width=True):
+        try:
+            import simplekml  # Добавьте импорт сюда
+            # Создаем KML файл
+            kml = simplekml.Kml()
             
+            for polygon_name, polygon_data in polygons.items():
+                # Полигон
+                pol = kml.newpolygon(name=polygon_name)
+                pol.outerboundaryis = polygon_data['coordinates']
+                
+                # Цвет из палитры
+                color_idx = list(polygons.keys()).index(polygon_name) % len(colors)
+                color_hex = colors[color_idx].lstrip('#')
+                
+                # Конвертируем цвет для KML (формат aabbggrr)
+                if len(color_hex) == 6:
+                    # Из RRGGBB в AABBGGRR
+                    r = int(color_hex[0:2], 16)
+                    g = int(color_hex[2:4], 16)
+                    b = int(color_hex[4:6], 16)
+                    kml_color = simplekml.Color.rgb(b, g, r, alpha=128)  # KML использует ABGR
+                else:
+                    kml_color = simplekml.Color.red
+                
+                pol.style.polystyle.color = kml_color
+                
+                # Описание
+                pol.description = f"""
+                <![CDATA[
+                <h3>{polygon_name}</h3>
+                <p><b>Аудитор:</b> {polygon_data['auditor']}</p>
+                <p><b>Город:</b> {polygon_data['city']}</p>
+                <p><b>Количество точек:</b> {len(polygon_data['points'])}</p>
+                ]]>
+                """
+                
+                # Добавляем точки в полигон
+                folder = kml.newfolder(name=f"Точки полигона {polygon_name}")
+                for point in polygon_data['points']:
+                    point_id, lat, lon = point
+                    
+                    # Находим информацию о точке
+                    point_info = points_df[points_df['ID_Точки'] == point_id]
+                    if not point_info.empty:
+                        point_name = point_info['Название_Точки'].iloc[0]
+                        point_address = point_info['Адрес'].iloc[0] if pd.notna(point_info['Адрес'].iloc[0]) and point_info['Адрес'].iloc[0] != '' else "Адрес не указан"
+                        point_type = point_info['Тип'].iloc[0]
+                    else:
+                        point_name = point_id
+                        point_address = "Информация не найдена"
+                        point_type = "Неизвестно"
+                    
+                    pnt = folder.newpoint(name=point_name)
+                    pnt.coords = [(lon, lat)]
+                    pnt.description = f"""
+                    <![CDATA[
+                    <h4>{point_name}</h4>
+                    <p><b>ID:</b> {point_id}</p>
+                    <p><b>Адрес:</b> {point_address}</p>
+                    <p><b>Тип:</b> {point_type}</p>
+                    <p><b>Аудитор:</b> {polygon_data['auditor']}</p>
+                    ]]>
+                    """
+                    pnt.style.iconstyle.color = kml_color
+            
+            # Сохраняем KML
+            # ИСПРАВЛЕНИЕ: Сохраняем KML в буфер памяти вместо файла
+            import tempfile
+            import os
+            
+            with tempfile.NamedTemporaryFile(mode='wb', suffix='.kml', delete=False) as tmp_file:
+                kml.save(tmp_file.name)
+                tmp_file_path = tmp_file.name
+
+            # Читаем из временного файла
+            with open(tmp_file_path, "rb") as f:
+                kml_data = f.read()
+
+            # Удаляем временный файл
+            try:
+                os.unlink(tmp_file_path)
+            except:
+                pass
+            
+            b64 = base64.b64encode(kml_data).decode()
+            href = f'<a href="data:application/vnd.google-earth.kml+xml;base64,{b64}" download="полигоны_аудиторов.kml">📥 Скачать KML файл</a>'
+            st.markdown(href, unsafe_allow_html=True)
+            st.success("✅ KML файл успешно сгенерирован!")
+            
+        except Exception as e:
+            st.error(f"❌ Ошибка при генерации KML: {str(e)}")
+
+with col2:
+    if st.button("🔄 Обновить полигоны", type="secondary", use_container_width=True):
+        st.session_state.generate_polygons_flag = True
+        st.rerun()
             else:
                 st.info("Нет данных о точках для отображения на карте")
         else:
@@ -1843,6 +1842,7 @@ st.caption(
     """
 
 )
+
 
 
 
