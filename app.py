@@ -1190,12 +1190,12 @@ if calculate_button:
             st.metric("Всего аудиторов", len(auditors_df))
         with col3:
             st.metric("Полигонов", len(polygons))
-        with col4:
+            with col4:
             total_visits = points_df['Кол-во_посещений'].sum()
             st.metric("Всего посещений", total_visits)
         
         # ==============================================
-        # ПОЛНЫЙ РАСЧЕТ СО СТАТИСТИКОЙ (ВАРИАНТ 2)
+        # ПОЛНЫЙ РАСЧЕТ СО СТАТИСТИКОЙ
         # ==============================================
         
         with st.spinner("📊 Расчет полной статистики..."):
@@ -1210,8 +1210,7 @@ if calculate_button:
                 st.session_state.type_stats_df = type_stats_df
                 st.session_state.summary_df = summary_df
                 st.session_state.details_df = detailed_with_fact
-                st.session_state.plan_calculated = True
-                st.session_state.plan_partial = False  # Теперь план полный
+                st.session_state.plan_calculated = True  # ← ВОТ ТУТ, ВНУТРИ БЛОКА!
                 
                 st.success("✅ Полный расчет завершен! Статистика готова.")
                 
@@ -1243,16 +1242,14 @@ if calculate_button:
                 st.session_state.polygons_info = polygons_info
                 st.session_state.points_assignment_df = points_assignment_df
                 st.session_state.detailed_plan_df = detailed_plan_df
-                st.session_state.data_loaded = True
-                st.session_state.plan_partial = True
+                st.session_state.plan_calculated = True  # ← И ЗДЕСЬ ТОЖЕ!
                 
                 st.success("✅ План частично рассчитан! Некоторые функции могут быть недоступны.")
-        
+    
     except Exception as e:
         st.error(f"❌ Произошла ошибка: {str(e)}")
         import traceback
         st.error(f"Детали ошибки:\n{traceback.format_exc()}")
-
 # ==============================================
 # ИНФОРМАЦИЯ О ПРОГРЕССЕ
 # ==============================================
@@ -1486,6 +1483,7 @@ if st.session_state.plan_calculated:
                     folium_static(m, width=1200, height=600)
         else:
             st.info("Полигоны еще не сгенерированы. Нажмите кнопку 'Рассчитать план'")
+
 
 
 
