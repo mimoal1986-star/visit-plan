@@ -152,6 +152,7 @@ def get_download_link(data, filename, text, mime_type='application/vnd.openxmlfo
 
 st.header("📤 Загрузка файлов")
 
+# Используем st.tabs для создания трех вкладок
 upload_tab1, upload_tab2, upload_tab3 = st.tabs([
     "📁 Загрузка файлов", 
     "📥 Скачать шаблоны", 
@@ -204,9 +205,10 @@ with upload_tab1:
 with upload_tab2:
     st.subheader("Шаблоны файлов")
     
-    col1, col2, col3 = st.columns(3)
+    # Создаем одну таблицу с тремя вкладками внутри
+    template_tabs = st.tabs(["Точки", "Аудиторы", "Факт посещений"])
     
-    with col1:
+    with template_tabs[0]:
         st.markdown("#### Шаблон Точки")
         points_template = create_template_points()
         excel_buffer = io.BytesIO()
@@ -214,8 +216,12 @@ with upload_tab2:
             points_template.to_excel(writer, sheet_name='Точки', index=False)
         excel_data = excel_buffer.getvalue()
         st.markdown(get_download_link(excel_data, "шаблон_точки.xlsx", "📥 Скачать шаблон"), unsafe_allow_html=True)
+        
+        # Показываем предпросмотр данных
+        st.markdown("**Предпросмотр данных:**")
+        st.dataframe(points_template, use_container_width=True)
     
-    with col2:
+    with template_tabs[1]:
         st.markdown("#### Шаблон Аудиторы")
         auditors_template = create_template_auditors()
         excel_buffer = io.BytesIO()
@@ -223,8 +229,12 @@ with upload_tab2:
             auditors_template.to_excel(writer, sheet_name='Аудиторы', index=False)
         excel_data = excel_buffer.getvalue()
         st.markdown(get_download_link(excel_data, "шаблон_аудиторы.xlsx", "📥 Скачать шаблон"), unsafe_allow_html=True)
+        
+        # Показываем предпросмотр данных
+        st.markdown("**Предпросмотр данных:**")
+        st.dataframe(auditors_template, use_container_width=True)
     
-    with col3:
+    with template_tabs[2]:
         st.markdown("#### Шаблон Факт посещений")
         visits_template = create_template_visits()
         excel_buffer = io.BytesIO()
@@ -232,6 +242,10 @@ with upload_tab2:
             visits_template.to_excel(writer, sheet_name='Факт_посещений', index=False)
         excel_data = excel_buffer.getvalue()
         st.markdown(get_download_link(excel_data, "шаблон_посещений.xlsx", "📥 Скачать шаблон"), unsafe_allow_html=True)
+        
+        # Показываем предпросмотр данных
+        st.markdown("**Предпросмотр данных:**")
+        st.dataframe(visits_template, use_container_width=True)
     
     st.markdown("---")
     st.info("""
@@ -245,9 +259,10 @@ with upload_tab2:
 with upload_tab3:
     st.subheader("Описание полей")
     
-    col1, col2 = st.columns(2)
+    # Используем st.tabs для трех вкладок внутри описания
+    desc_tabs = st.tabs(["Файл 'Точки'", "Файл 'Аудиторы'", "Файл 'Факт посещений'"])
     
-    with col1:
+    with desc_tabs[0]:
         st.markdown("""
         ### Файл 'Точки'
         
@@ -266,9 +281,16 @@ with upload_tab3:
         - `Convenience` → Мини
         - `Hypermarket` → Гипер
         - `Supermarket` → Супер
+        
+        **Пример данных:**
+        ```csv
+        ID_Точки,Название_Точки,Адрес,Широта,Долгота,Город,Тип,Кол-во_посещений
+        P001,Магазин 1,ул. Ленина, 1,55.7558,37.6173,Москва,Convenience,1
+        P002,Гипермаркет 1,ул. Мира, 10,55.7507,37.6177,Москва,Hypermarket,1
+        ```
         """)
     
-    with col2:
+    with desc_tabs[1]:
         st.markdown("""
         ### Файл 'Аудиторы'
         
@@ -276,6 +298,17 @@ with upload_tab3:
         - `ID_Сотрудника` - уникальный ID
         - `Город` - город работы
         
+        **Пример данных:**
+        ```csv
+        ID_Сотрудника,Город
+        SOVIAUD10,Москва
+        SOVIAUD11,Москва
+        SOVIAUD12,Санкт-Петербург
+        ```
+        """)
+    
+    with desc_tabs[2]:
+        st.markdown("""
         ### Файл 'Факт_посещений'
         
         **Обязательные поля:**
@@ -286,6 +319,14 @@ with upload_tab3:
         **Формат:**
         - Одна строка = один визит
         - Можно оставить пустым, если данных нет
+        
+        **Пример данных:**
+        ```csv
+        ID_Точки,Дата_визита,ID_Сотрудника
+        P001,15.04.2025,SOVIAUD10
+        P001,30.04.2025,SOVIAUD10
+        P002,16.04.2025,SOVIAUD11
+        ```
         """)
 
 st.markdown("---")
