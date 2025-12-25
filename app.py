@@ -408,6 +408,7 @@ def generate_polygons(polygons_info):
             
             if len(points) >= 3:
                 try:
+                    # Исправлено: правильный доступ к координатам
                     hull = ConvexHull(points[:, 1:3])  # Берем только координаты (широта, долгота)
                     polygon_coords = points[hull.vertices, 1:3].tolist()
                     
@@ -450,7 +451,7 @@ def distribute_visits_by_weeks(points_assignment_df, points_df, year, quarter, c
         
         # Определяем этапы (4 этапа в квартале)
         total_weeks = len(weeks)
-        stage_size = total_weeks // 4
+        stage_size = max(total_weeks // 4, 1)  # Исправлено: предотвращаем деление на 0
         
         # Распределяем точки
         for _, assignment in points_assignment_df.iterrows():
@@ -491,6 +492,10 @@ def distribute_points_to_auditors(points_df, auditors_df):
     Распределяет точки по аудиторам внутри каждого города
     Простой алгоритм: сортировка по долготе и деление на равные части
     """
+    
+    if points_df is None or points_df.empty:
+        st.error("❌ Нет данных о точках для распределения")
+        return None, None
     
     results = []
     polygons_info = {}
@@ -765,7 +770,10 @@ st.markdown("---")
 # КНОПКА РАСЧЕТА ПЛАНА
 # ==============================================
 
-if st.button("🚀 Рассчитать план", type="primary", use_container_width=True, key="calculate_plan_btn"):
+# ТОЛЬКО ОДНА КНОПКА ВСЕМ КОДЕ!
+calculate_button = st.button("🚀 Рассчитать план", type="primary", use_container_width=True, key="calculate_plan_btn")
+
+if calculate_button:
     
     if 'data_file' not in st.session_state or st.session_state.data_file is None:
         st.error("⚠️ Пожалуйста, сначала загрузите файл с данными!")
