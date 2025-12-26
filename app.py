@@ -1505,9 +1505,11 @@ if st.session_state.plan_calculated:
     if (st.session_state.city_stats_df is not None or 
         st.session_state.type_stats_df is not None):
         available_tabs.append("📈 Диаграммы")
+            
+    available_tabs.append("📤 Выгрузка данных")  # Новая вкладка выгрузки
     
-    if st.session_state.polygons is not None and len(st.session_state.polygons) > 0:
-        available_tabs.append("🗺️ Карта полигонов")
+    #if st.session_state.polygons is not None and len(st.session_state.polygons) > 0:
+    #    available_tabs.append("🗺️ Карта полигонов")
     
     # Создаем вкладки
     if available_tabs:
@@ -2045,5 +2047,6 @@ def create_light_map(points_df, polygons, max_points=200):
             ).add_to(m)
     
     return m
+
 
 
