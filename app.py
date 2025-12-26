@@ -802,78 +802,38 @@ def calculate_statistics(points_df, visits_df, detailed_plan_df, year, quarter):
     )
 
 def create_google_maps_excel(points_df, polygons):
-    """Создает Excel файл для импорта в Google Maps"""
+    """Создает Excel файл для импорта в Google Maps (упрощенная версия)"""
     import io
     
     excel_buffer = io.BytesIO()
     
     with pd.ExcelWriter(excel_buffer, engine='openpyxl') as writer:
-        # Лист 1: Точки для карты
+        # Лист 1: Точки для карты (только основные данные)
         map_data = []
         
-        # Добавляем точки
         for _, point in points_df.iterrows():
             # Находим полигон точки
             point_polygon = "Не назначен"
             point_auditor = "Неизвестно"
             
+            # Упрощенный поиск (без вложенных циклов)
             for poly_name, poly_info in polygons.items():
-                for pt in poly_info.get('points', []):
-                    if len(pt) >= 3 and pt[0] == point['ID_Точки']:
-                        point_polygon = poly_name
-                        point_auditor = poly_info.get('auditor', 'Неизвестно')
-                        break
+                point_ids = [pt[0] for pt in poly_info.get('points', []) if len(pt) >= 3]
+                if point['ID_Точки'] in point_ids:
+                    point_polygon = poly_name
+                    point_auditor = poly_info.get('auditor', 'Неизвестно')
+                    break
             
             map_data.append({
-                'Name': f"🏪 {point['Название_Точки']}",
-                'Description': f"""
-                <b>Тип:</b> {point.get('Тип', 'Неизвестно')}<br>
-                <b>Адрес:</b> {point.get('Адрес', 'Не указан')}<br>
-                <b>Полигон:</b> {point_polygon}<br>
-                <b>Аудитор:</b> {point_auditor}<br>
-                <b>ID:</b> {point['ID_Точки']}
-                """.strip(),
+                'Name': f"{point['Название_Точки']}",
+                'Description': f"Тип: {point.get('Тип', 'Неизвестно')}, Полигон: {point_polygon}, Аудитор: {point_auditor}",
                 'Latitude': point['Широта'],
                 'Longitude': point['Долгота'],
-                'Type': 'Point',
-                'Color': 'blue'
+                'Type': 'Point'
             })
-        
-        # Добавляем центроиды полигонов
-        for poly_name, poly_info in polygons.items():
-            # Вычисляем центроид
-            center_lat, center_lon = calculate_polygon_center(poly_info)
-            
-            if center_lat and center_lon:
-                map_data.append({
-                    'Name': f"🗺️ Полигон: {poly_name}",
-                    'Description': f"""
-                    <b>Полигон:</b> {poly_name}<br>
-                    <b>Аудитор:</b> {poly_info.get('auditor', 'Неизвестно')}<br>
-                    <b>Город:</b> {poly_info.get('city', 'Неизвестно')}<br>
-                    <b>Количество точек:</b> {len(poly_info.get('points', []))}
-                    """.strip(),
-                    'Latitude': center_lat,
-                    'Longitude': center_lon,
-                    'Type': 'Polygon_Center',
-                    'Color': 'red'
-                })
         
         df_map = pd.DataFrame(map_data)
         df_map.to_excel(writer, sheet_name='Google Maps Data', index=False)
-        
-        # Лист 2: Инструкция
-        instructions = pd.DataFrame({
-            'Шаг': [1, 2, 3, 4, 5],
-            'Действие': [
-                'Откройте Google My Maps',
-                'Создайте новую карту → Импорт',
-                'Выберите этот файл Excel',
-                'Сопоставьте столбцы: Latitude, Longitude, Name',
-                'Нажмите "Импортировать"'
-            ]
-        })
-        instructions.to_excel(writer, sheet_name='Инструкция', index=False)
     
     return excel_buffer.getvalue()
 
@@ -1824,20 +1784,25 @@ if st.session_state.plan_calculated:
                     
                     with col2:
                         if st.button("📥 Скачать Excel", key="download_excel_google", use_container_width=True):
-                            try:
-                                if 'polygons' not in st.session_state or not st.session_state.polygons:
-                                    st.error("❌ Нет данных полигонов")
-                                else:
-                                    excel_buffer = create_google_maps_excel(
-                                        st.session_state.points_df,
-                                        st.session_state.polygons
-                                    )
-                                    
-                                    st.session_state.excel_buffer = excel_buffer
-                                    st.success("✅ Файл готов!")
-                                    st.rerun()
-                            except Exception as e:
-                                st.error(f"❌ Ошибка: {str(e)}")
+                            with st.spinner("🔄 Создание файла..."):
+                                try:
+                                    if 'polygons' not in st.session_state or not st.session_state.polygons:
+                                        st.error("❌ Нет данных полигонов")
+                                    else:
+                                        excel_buffer = create_google_maps_excel(...)
+                                        
+                                        # Сразу даем скачать
+                                        st.download_button(
+                                            label="📊 Нажмите, чтобы скачать Excel",
+                                            data=excel_buffer,
+                                            file_name=f"google_maps_{year}_Q{quarter}.xlsx",
+                                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                                            use_container_width=True,
+                                            key=f"google_excel_{year}_{quarter}_{id(excel_buffer)}"
+                                        )
+                                        st.success("✅ Файл создан! Нажмите кнопку выше для скачивания")
+                                except Exception as e:
+                                    st.error(f"❌ Ошибка: {str(e)}")
                 
                 # КОЛОНКА 2: KML для Google Earth
                 with st.container(border=True):
@@ -1865,9 +1830,9 @@ if st.session_state.plan_calculated:
                                         st.session_state.polygons
                                     )
                                     
-                                    st.session_state.kml_content = kml_content
+                                    st.session_state.kml_content = kml_content  # ← УДАЛИ
                                     st.success("✅ Файл готов!")
-                                    st.rerun()
+                                    st.rerun()  # ← УДАЛИ
                             except Exception as e:
                                 st.error(f"❌ Ошибка: {str(e)}")
                 
@@ -1888,22 +1853,30 @@ if st.session_state.plan_calculated:
                         """)
                     
                     with col2:
-                        if st.button("📥 Скачать полный отчет", key="download_full_report", use_container_width=True):
-                            try:
-                                full_excel = create_full_excel_report(
-                                    st.session_state.points_df,
-                                    st.session_state.auditors_df,
-                                    st.session_state.city_stats_df,
-                                    st.session_state.type_stats_df,
-                                    st.session_state.summary_df,
-                                    st.session_state.polygons
-                                )
-                                
-                                st.session_state.full_report = full_excel
-                                st.success("✅ Файл готов!")
-                                st.rerun()
-                            except Exception as e:
-                                st.error(f"❌ Ошибка: {str(e)}")
+                if st.button("📥 Скачать полный отчет", key="download_full_report", use_container_width=True):
+                    with st.spinner("🔄 Создание полного отчета Excel..."):
+                        try:
+                            full_excel = create_full_excel_report(
+                                st.session_state.points_df,
+                                st.session_state.auditors_df,
+                                st.session_state.city_stats_df,
+                                st.session_state.type_stats_df,
+                                st.session_state.summary_df,
+                                st.session_state.polygons
+                            )
+                            
+                            # Сразу показываем кнопку скачивания
+                            st.download_button(
+                                label="📋 Нажмите, чтобы скачать полный отчет Excel",
+                                data=full_excel,
+                                file_name=f"full_report_{year}_Q{quarter}.xlsx",
+                                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                                use_container_width=True,
+                                key=f"full_report_{year}_{quarter}_{datetime.now().timestamp()}"  # Уникальный ключ
+                            )
+                            st.success("✅ Полный отчет создан! Нажмите кнопку выше для скачивания")
+                        except Exception as e:
+                            st.error(f"❌ Ошибка создания отчета: {str(e)}")
                 
                 # === ОТДЕЛЬНАЯ СЕКЦИЯ ДЛЯ СКАЧИВАНИЯ ФАЙЛОВ ===
                 if any(key in st.session_state for key in ['excel_buffer', 'kml_content', 'full_report']):
@@ -2036,3 +2009,4 @@ if st.session_state.plan_calculated:
         st.warning("⚠️ Нет данных для отображения в результатах")
 else:
     st.info("📋 Загрузите данные и нажмите 'Рассчитать план' для отображения результатов")
+
