@@ -798,10 +798,6 @@ def calculate_statistics(points_df, visits_df, detailed_plan_df, year, quarter):
         summary_df,
         detailed_with_fact
     )
-# ==============================================
-# ФУНКЦИИ ДЛЯ ВЫГРУЗКИ ДАННЫХ (ДОБАВЛЯЕМ ЗДЕСЬ)
-# ==============================================
-
 def create_google_maps_excel(points_df, polygons):
     """Создает Excel файл для импорта в Google Maps"""
     import io
@@ -868,7 +864,196 @@ def create_google_maps_excel(points_df, polygons):
             'Шаг': [1, 2, 3, 4, 5],
             'Действие': [
                 'Откройте Google My Maps',
-                '
+                'Создайте новую карту → Импорт',
+                'Выберите этот файл Excel',
+                'Сопоставьте столбцы: Latitude, Longitude, Name',
+                'Нажмите "Импортировать"'
+            ]
+        })
+        instructions.to_excel(writer, sheet_name='Инструкция', index=False)
+    
+    return excel_buffer.getvalue()
+
+def create_kml_file(points_df, polygons):
+    """Создает KML файл для Google Earth"""
+    kml_header = '''<?xml version="1.0" encoding="UTF-8"?>
+<kml xmlns="http://www.opengis.net/kml/2.2">
+<Document>
+<name>Полигоны и точки аудиторов</name>
+'''
+    
+    kml_content = kml_header
+    
+    # Добавляем полигоны
+    for poly_name, poly_info in polygons.items():
+        if 'coordinates' in poly_info and len(poly_info['coordinates']) > 0:
+            coords = poly_info['coordinates']
+            coord_string = " ".join([f"{lon},{lat},0" for lat, lon in coords if len([lat, lon]) >= 2])
+            
+            if coord_string:
+                kml_content += f'''
+<Placemark>
+<name>🗺️ {poly_name}</name>
+<description>Аудитор: {poly_info.get('auditor', 'Неизвестно')}
+Город: {poly_info.get('city', 'Неизвестно')}
+Количество точек: {len(poly_info.get('points', []))}</description>
+<styleUrl>#polygonStyle</styleUrl>
+<Polygon>
+<outerBoundaryIs>
+<LinearRing>
+<coordinates>{coord_string}</coordinates>
+</LinearRing>
+</outerBoundaryIs>
+</Polygon>
+</Placemark>
+'''
+    
+    # Добавляем точки
+    for _, point in points_df.iterrows():
+        kml_content += f'''
+<Placemark>
+<name>🏪 {point['Название_Точки'][:30]}</name>
+<description>ID: {point['ID_Точки']}
+Тип: {point.get('Тип', 'Неизвестно')}
+Адрес: {point.get('Адрес', 'Не указан')}</description>
+<Point>
+<coordinates>{point['Долгота']},{point['Широта']},0</coordinates>
+</Point>
+</Placemark>
+'''
+    
+    kml_content += '''
+<Style id="polygonStyle">
+<LineStyle>
+<color>ff0000ff</color>
+<width>2</width>
+</LineStyle>
+<PolyStyle>
+<color>400000ff</color>
+<fill>1</fill>
+<outline>1</outline>
+</PolyStyle>
+</Style>
+</Document>
+</kml>
+'''
+    
+    return kml_content
+
+def create_full_excel_report(points_df, auditors_df, city_stats_df, 
+                            type_stats_df, summary_df, polygons):
+    """Создает полный отчет Excel со всеми данными"""
+    import io
+    
+    excel_buffer = io.BytesIO()
+    
+    with pd.ExcelWriter(excel_buffer, engine='openpyxl') as writer:
+        # Лист 1: Точки
+        if points_df is not None:
+            points_df.to_excel(writer, sheet_name='Точки', index=False)
+        
+        # Лист 2: Аудиторы
+        if auditors_df is not None:
+            auditors_df.to_excel(writer, sheet_name='Аудиторы', index=False)
+        
+        # Лист 3: Статистика по городам
+        if city_stats_df is not None:
+            city_stats_df.to_excel(writer, sheet_name='Статистика_городов', index=False)
+        
+        # Лист 4: План посещений
+        if summary_df is not None:
+            summary_df.to_excel(writer, sheet_name='План_посещений', index=False)
+        
+        # Лист 5: Полигоны
+        if polygons:
+            poly_data = []
+            for poly_name, poly_info in polygons.items():
+                poly_data.append({
+                    'Полигон': poly_name,
+                    'Аудитор': poly_info.get('auditor', 'Неизвестно'),
+                    'Город': poly_info.get('city', 'Неизвестно'),
+                    'Количество_точек': len(poly_info.get('points', [])),
+                    'Координаты_полигона': str(poly_info.get('coordinates', []))
+                })
+            
+            pd.DataFrame(poly_data).to_excel(writer, sheet_name='Полигоны', index=False)
+    
+    return excel_buffer.getvalue()
+
+def calculate_polygon_center(poly_info):
+    """Вычисляет центроид полигона"""
+    try:
+        # Из координат полигона
+        if 'coordinates' in poly_info and poly_info['coordinates']:
+            coords = poly_info['coordinates']
+            lats = [c[0] for c in coords if len(c) >= 2]
+            lons = [c[1] for c in coords if len(c) >= 2]
+            
+            if lats and lons:
+                return sum(lats) / len(lats), sum(lons) / len(lons)
+        
+        # Из точек полигона
+        if 'points' in poly_info and poly_info['points']:
+            points = poly_info['points']
+            lats = []
+            lons = []
+            
+            for point in points:
+                if len(point) >= 3:
+                    lats.append(point[1])  # широта
+                    lons.append(point[2])  # долгота
+            
+            if lats and lons:
+                return sum(lats) / len(lats), sum(lons) / len(lons)
+    except:
+        pass
+    
+    return None, None
+
+def create_light_map(points_df, polygons, max_points=200):
+    """Создает легкую карту (ограниченное количество точек)"""
+    import folium
+    
+    # Центр карты
+    center_lat = points_df['Широта'].mean()
+    center_lon = points_df['Долгота'].mean()
+    
+    m = folium.Map(location=[center_lat, center_lon], zoom_start=10)
+    
+    # Ограничиваем количество точек для производительности
+    if len(points_df) > max_points:
+        display_points = points_df.sample(max_points)
+        folium.Marker(
+            location=[center_lat, center_lon],
+            popup=f"Показано {max_points} из {len(points_df)} точек",
+            icon=folium.Icon(color='red', icon='info-sign')
+        ).add_to(m)
+    else:
+        display_points = points_df
+    
+    # Простые маркеры для точек
+    for _, point in display_points.iterrows():
+        folium.CircleMarker(
+            location=[point['Широта'], point['Долгота']],
+            radius=3,
+            popup=point['ID_Точки'],
+            color='blue',
+            fill=True
+        ).add_to(m)
+    
+    # Полигоны
+    for poly_name, poly_info in polygons.items():
+        if 'coordinates' in poly_info and len(poly_info['coordinates']) > 2:
+            folium.Polygon(
+                locations=poly_info['coordinates'],
+                popup=f"Полигон: {poly_name}",
+                color='red',
+                weight=2,
+                fill=True,
+                fill_opacity=0.1
+            ).add_to(m)
+    
+    return m
 # ==============================================
 # РАЗДЕЛ ЗАГРУЗКИ ФАЙЛОВ
 # ==============================================
@@ -1860,4 +2045,5 @@ def create_light_map(points_df, polygons, max_points=200):
             ).add_to(m)
     
     return m
+
 
