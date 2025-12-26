@@ -1754,7 +1754,7 @@ if st.session_state.plan_calculated:
             current_tab += 1
         
 # ВКЛАДКА 4: Выгрузка данных
-if "📤 Выгрузка данных" in available_tabs:
+if available_tabs and "📤 Выгрузка данных" in available_tabs:
     with results_tabs[current_tab]:
         st.subheader("📤 Выгрузка данных для карт и отчетов")
         
@@ -1967,3 +1967,4 @@ if "📤 Выгрузка данных" in available_tabs:
                   f"{len(st.session_state.polygons) if st.session_state.polygons else 0} полигонов, "
                   f"{len(st.session_state.auditors_df) if st.session_state.auditors_df is not None else 0} аудиторов")
     current_tab += 1
+
