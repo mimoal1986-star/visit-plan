@@ -811,46 +811,60 @@ def create_google_maps_excel(points_df, polygons):
         # Лист 1: Точки для карты (разделенные атрибуты)
         map_data = []
         
+        # Создаем словарь для быстрого поиска полигонов по точкам
+        point_to_polygon = {}
+        for poly_name, poly_info in polygons.items():
+            for pt in poly_info.get('points', []):
+                if len(pt) >= 3:
+                    point_id = str(pt[0])  # Приводим к строке
+                    point_to_polygon[point_id] = {
+                        'polygon': poly_name,
+                        'auditor': poly_info.get('auditor', 'Неизвестно')
+                    }
+        
         for _, point in points_df.iterrows():
-            # Находим полигон точки
-            point_polygon = "Не назначен"
-            point_auditor = "Неизвестно"
+            # Быстрый поиск полигона через словарь
+            point_id_str = str(point['ID_Точки'])
+            poly_info = point_to_polygon.get(point_id_str, {})
+            point_polygon = poly_info.get('polygon', 'Не назначен')
+            point_auditor = poly_info.get('auditor', 'Неизвестно')
             
-            # Поиск полигона для точки
-            for poly_name, poly_info in polygons.items():
-                point_ids = []
-                for pt in poly_info.get('points', []):
-                    if len(pt) >= 3 and pt[0] == point['ID_Точки']:
-                        point_polygon = poly_name
-                        point_auditor = poly_info.get('auditor', 'Неизвестно')
-                        break
-                if point_polygon != "Не назначен":
-                    break
+            # Получаем данные точки
+            point_type = point.get('Тип', 'Неизвестно')
+            city = point.get('Город', 'Неизвестно')
+            address = point.get('Адрес', 'Не указан')
+            visits = point.get('Кол-во_посещений', 1)
+            name = point.get('Название_Точки', point['ID_Точки'])
             
             # Форматируем данные для Google Maps
             map_data.append({
-                'Name': f"{point['Название_Точки']}",
+                'Name': name,
                 'Latitude': point['Широта'],
                 'Longitude': point['Долгота'],
                 'Type': 'Point',
-                # Атрибуты в отдельных столбцах
+                # Основной дескрипшен (можно настроить формат)
+                'Description': f"{name} | {city} | {point_type}",
+                # Раздельные атрибуты в отдельных столбцах
                 'ID_Точки': point['ID_Точки'],
-                'Город': point.get('Город', 'Неизвестно'),
-                'Тип_точки': point.get('Тип', 'Неизвестно'),
+                'Город': city,
+                'Тип_точки': point_type,
+                'Категория': f"{city} - {point_type}",  # Для группировки в Google Maps
                 'Полигон': point_polygon,
                 'Аудитор': point_auditor,
-                'Адрес': point.get('Адрес', 'Не указан'),
-                'Кол-во_посещений': point.get('Кол-во_посещений', 1),
-                # Объединенное описание (для совместимости)
-                'Description': f"Тип: {point.get('Тип', 'Неизвестно')}, Полигон: {point_polygon}, Аудитор: {point_auditor}"
+                'Адрес': address,
+                'Кол-во_посещений': visits,
+                # Дополнительные поля для фильтрации
+                'Цвет_маркера': point_type,  # Можно использовать для цветового кодирования
+                'Размер_маркера': 'medium' if visits <= 2 else 'large'
             })
         
         df_map = pd.DataFrame(map_data)
         
-        # Порядок столбцов для удобства
+        # Оптимальный порядок столбцов для Google Maps
         column_order = [
             'Name',
-            'Description',  # Объединенный дескрипшн для совместимости
+            'Description',
+            'Категория',
             'ID_Точки',
             'Город',
             'Тип_точки',
@@ -858,50 +872,70 @@ def create_google_maps_excel(points_df, polygons):
             'Аудитор',
             'Адрес',
             'Кол-во_посещений',
+            'Цвет_маркера',
+            'Размер_маркера',
             'Latitude',
             'Longitude',
             'Type'
         ]
         
-        df_map = df_map[column_order]
+        # Оставляем только существующие колонки
+        existing_columns = [col for col in column_order if col in df_map.columns]
+        df_map = df_map[existing_columns]
+        
+        # Экспорт в Excel
         df_map.to_excel(writer, sheet_name='Google Maps Data', index=False)
         
-        # Лист 2: Инструкция по импорту
+        # Лист 2: Инструкция по импорту с акцентом на раздельные столбцы
         instructions = pd.DataFrame({
-            'Шаг': [1, 2, 3, 4, 5],
+            'Шаг': [1, 2, 3, 4, 5, 6],
             'Действие': [
-                'Откройте Google My Maps (https://www.google.com/maps/d/)',
-                'Создайте новую карту → нажмите "Импорт"',
+                'Откройте Google My Maps',
+                'Создайте карту → нажмите "Импорт"',
                 'Загрузите этот Excel файл',
-                'Выберите столбцы для отображения: Latitude → Широта, Longitude → Долгота',
-                'Настройте стиль маркеров по столбцам: Тип_точки, Полигон или Аудитор'
+                'Настройте координаты: Latitude→Широта, Longitude→Долгота',
+                'Используйте раздельные столбцы для группировки:',
+                'Настройте стиль маркеров:'
             ],
-            'Примечание': [
-                'Требуется аккаунт Google',
+            'Детали': [
+                'https://www.google.com/maps/d/',
                 'Или перетащите файл в окно карты',
-                'Убедитесь, что расширение .xlsx',
-                'Google Maps автоматически определит координаты',
-                'Используйте фильтры для группировки точек'
+                'Выберите лист "Google Maps Data"',
+                'Google Maps автоматически определит местоположение',
+                '• Категория - для основной группировки\n• Тип_точки - для цвета маркеров\n• Полигон - для слоев\n• Аудитор - для фильтрации',
+                '• Цвет_маркера - цвет по типу точки\n• Размер_маркера - размер по количеству посещений'
             ]
         })
         instructions.to_excel(writer, sheet_name='Инструкция', index=False)
         
-        # Лист 3: Сводка по полигонам (дополнительно)
-        poly_summary = []
-        for poly_name, poly_info in polygons.items():
-            center_lat, center_lon = calculate_polygon_center(poly_info)
-            poly_summary.append({
-                'Полигон': poly_name,
-                'Аудитор': poly_info.get('auditor', 'Неизвестно'),
-                'Город': poly_info.get('city', 'Неизвестно'),
-                'Количество_точек': len(poly_info.get('points', [])),
-                'Центр_широта': center_lat if center_lat else '',
-                'Центр_долгота': center_lon if center_lon else ''
-            })
-        
-        if poly_summary:
-            df_poly = pd.DataFrame(poly_summary)
-            df_poly.to_excel(writer, sheet_name='Полигоны', index=False)
+        # Лист 3: Сводка для справки
+        if polygons:
+            summary_data = []
+            for poly_name, poly_info in polygons.items():
+                # Подсчет статистики по типу точек в полигоне
+                type_stats = {}
+                for pt in poly_info.get('points', []):
+                    if len(pt) >= 3:
+                        point_id = str(pt[0])
+                        # Находим точку в основном DataFrame
+                        point_row = points_df[points_df['ID_Точки'].astype(str) == point_id]
+                        if not point_row.empty:
+                            point_type = point_row.iloc[0].get('Тип', 'Неизвестно')
+                            type_stats[point_type] = type_stats.get(point_type, 0) + 1
+                
+                # Формируем строку для каждого типа
+                for point_type, count in type_stats.items():
+                    summary_data.append({
+                        'Полигон': poly_name,
+                        'Аудитор': poly_info.get('auditor', 'Неизвестно'),
+                        'Город': poly_info.get('city', 'Неизвестно'),
+                        'Тип_точки': point_type,
+                        'Количество_точек': count
+                    })
+            
+            if summary_data:
+                df_summary = pd.DataFrame(summary_data)
+                df_summary.to_excel(writer, sheet_name='Сводка_полигонов', index=False)
     
     return excel_buffer.getvalue()
 
@@ -2302,6 +2336,7 @@ if st.session_state.plan_calculated:
                   f"{len(st.session_state.polygons) if st.session_state.polygons else 0} полигонов, "
                   f"{len(st.session_state.auditors_df) if st.session_state.auditors_df is not None else 0} аудиторов")
     current_tab += 1
+
 
 
 
