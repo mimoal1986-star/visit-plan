@@ -798,7 +798,7 @@ def calculate_statistics(points_df, visits_df, detailed_plan_df, year, quarter):
         summary_df,
         detailed_with_fact
     )
-def create_google_maps_excel(points_df, polygons):
+    def create_google_maps_excel(points_df, polygons):
     """Создает Excel файл для импорта в Google Maps"""
     import io
     
@@ -1054,6 +1054,7 @@ def create_light_map(points_df, polygons, max_points=200):
             ).add_to(m)
     
     return m
+
 # ==============================================
 # РАЗДЕЛ ЗАГРУЗКИ ФАЙЛОВ
 # ==============================================
@@ -1412,7 +1413,7 @@ if calculate_button:
         st.error(f"❌ Произошла ошибка: {str(e)}")
         import traceback
         st.error(f"Детали ошибки:\n{traceback.format_exc()}")
-# ==============================================
+        # ==============================================
 # ИНФОРМАЦИЯ О ПРОГРЕССЕ
 # ==============================================
 
@@ -1475,7 +1476,7 @@ st.markdown("---")
 st.caption("📋 **Часть 2/5:** Функции обработки данных, генерация полигонов, распределение посещений по неделям")
 
 # ==============================================
-# ВКЛАДКИ С РЕЗУЛЬТАТАМИ
+# ВКЛАДКИ С РЕЗУЛЬТАТАМИ (ИСПРАВЛЕННЫЙ КОД)
 # ==============================================
 
 if st.session_state.plan_calculated:
@@ -1491,9 +1492,8 @@ if st.session_state.plan_calculated:
         FOLIUM_AVAILABLE = False
         st.warning("⚠️ Для отображения карты установите: pip install folium streamlit-folium")
     
-    # Создаем вкладки только если есть данные
+    # 1. СОЗДАЕМ СПИСОК ВКЛАДОК
     available_tabs = []
-    tab_labels = []
     
     # Проверяем, какие данные есть
     if st.session_state.city_stats_df is not None:
@@ -1505,21 +1505,19 @@ if st.session_state.plan_calculated:
     if (st.session_state.city_stats_df is not None or 
         st.session_state.type_stats_df is not None):
         available_tabs.append("📈 Диаграммы")
-            
-    available_tabs.append("📤 Выгрузка данных")  # Новая вкладка выгрузки
     
-    #if st.session_state.polygons is not None and len(st.session_state.polygons) > 0:
-    #    available_tabs.append("🗺️ Карта полигонов")
+    available_tabs.append("📤 Выгрузка данных")
     
-    # Создаем вкладки
+    # 2. СОЗДАЕМ ВКЛАДКИ ТОЛЬКО ОДИН РАЗ
     if available_tabs:
         results_tabs = st.tabs(available_tabs)
         
-        tab_index = 0
+        # 3. РАБОТАЕМ С КАЖДОЙ ВКЛАДКОЙ ПО ПОРЯДКУ
+        current_tab = 0
         
         # ВКЛАДКА 1: Статистика по городам
         if "📊 Статистика по городам" in available_tabs:
-            with results_tabs[tab_index]:
+            with results_tabs[current_tab]:
                 st.subheader("📊 Статистика по городам")
                 
                 if st.session_state.city_stats_df is not None:
@@ -1552,11 +1550,11 @@ if st.session_state.plan_calculated:
                             st.error(f"❌ Ошибка при создании Excel файла: {str(e)}")
                     else:
                         st.warning("Нет данных для выгрузки в Excel")
-            tab_index += 1
+            current_tab += 1
         
         # ВКЛАДКА 2: План посещений 
         if "📋 План посещений" in available_tabs:
-            with results_tabs[tab_index]:
+            with results_tabs[current_tab]:
                 st.subheader("📋 План посещений")
                 
                 if st.session_state.summary_df is not None:
@@ -1698,11 +1696,11 @@ if st.session_state.plan_calculated:
                             st.info("Нет данных по выбранным фильтрам")
                     else:
                         st.info("Нет данных для отображения")
-            tab_index += 1
+            current_tab += 1
         
         # ВКЛАДКА 3: Диаграммы
         if "📈 Диаграммы" in available_tabs:
-            with results_tabs[tab_index]:
+            with results_tabs[current_tab]:
                 st.subheader("📈 Диаграммы и статистика")
                 
                 # 1. Диаграмма выполнения плана по городам
@@ -1789,507 +1787,249 @@ if st.session_state.plan_calculated:
                     if st.session_state.polygons is not None:
                         total_polygons = len(st.session_state.polygons)
                         st.metric("Полигонов", total_polygons)
-            tab_index += 1
-
-# ВКЛАДКА 4: Выгрузка данных (ДОБАВЬТЕ ЭТОТ КОД)
-if "📤 Выгрузка данных" in available_tabs:
-    with results_tabs[tab_index]:
-        st.subheader("📤 Выгрузка данных для карт и отчетов")
+            current_tab += 1
         
-        st.info("""
-        **Выберите формат выгрузки:**  
-        🔹 **Excel для Google Карт** - данные с координатами для импорта  
-        🔹 **KML для Google Earth** - географические данные с полигонами  
-        🔹 **Полный отчет Excel** - все данные для анализа  
-        """)
-        
-        st.markdown("---")
-        
-        # КОЛОНКА 1: Excel для Google Карт
-        with st.container(border=True):
-            st.markdown("### 📊 Excel для Google Карт")
-            st.caption("Формат для импорта в Google Карты / My Maps")
-            
-            col1, col2 = st.columns([2, 1])
-            with col1:
-                st.markdown("""
-                **Что включено:**
-                - Все точки с координатами
-                - Полигоны с центроидами
-                - Описания и метаданные
-                - Готовые столбцы для импорта
-                """)
-            
-            with col2:
-                if st.button("📥 Скачать Excel", key="download_excel_google", use_container_width=True):
-                    try:
-                        if 'polygons' not in st.session_state or not st.session_state.polygons:
-                            st.error("❌ Нет данных полигонов")
-                        else:
-                            excel_buffer = create_google_maps_excel(
-                                st.session_state.points_df,
-                                st.session_state.polygons
-                            )
-                            
-                            st.session_state.excel_buffer = excel_buffer
-                            st.success("✅ Файл готов!")
-                            st.rerun()
-                    except Exception as e:
-                        st.error(f"❌ Ошибка: {str(e)}")
-        
-        # КОЛОНКА 2: KML для Google Earth
-        with st.container(border=True):
-            st.markdown("### 🗺️ KML для Google Earth")
-            st.caption("Географический формат для GIS-систем")
-            
-            col1, col2 = st.columns([2, 1])
-            with col1:
-                st.markdown("""
-                **Что включено:**
-                - Полигоны как замкнутые контуры
-                - Точки с метками
-                - Иерархия по городам/аудиторам
-                - Поддерживается в Google Earth, QGIS
-                """)
-            
-            with col2:
-                if st.button("📥 Скачать KML", key="download_kml", use_container_width=True):
-                    try:
-                        if 'polygons' not in st.session_state or not st.session_state.polygons:
-                            st.error("❌ Нет данных полигонов")
-                        else:
-                            kml_content = create_kml_file(
-                                st.session_state.points_df,
-                                st.session_state.polygons
-                            )
-                            
-                            st.session_state.kml_content = kml_content
-                            st.success("✅ Файл готов!")
-                            st.rerun()
-                    except Exception as e:
-                        st.error(f"❌ Ошибка: {str(e)}")
-        
-        # КОЛОНКА 3: Полный отчет Excel
-        with st.container(border=True):
-            st.markdown("### 📋 Полный отчет Excel")
-            st.caption("Все данные приложения в одном файле")
-            
-            col1, col2 = st.columns([2, 1])
-            with col1:
-                st.markdown("""
-                **Что включено:**
-                - Статистика по городам
-                - План посещений по неделям
-                - Распределение по аудиторам
-                - Данные по точкам
-                - Полигоны и координаты
-                """)
-            
-            with col2:
-                if st.button("📥 Скачать полный отчет", key="download_full_report", use_container_width=True):
-                    try:
-                        full_excel = create_full_excel_report(
-                            st.session_state.points_df,
-                            st.session_state.auditors_df,
-                            st.session_state.city_stats_df,
-                            st.session_state.type_stats_df,
-                            st.session_state.summary_df,
-                            st.session_state.polygons
-                        )
-                        
-                        st.session_state.full_report = full_excel
-                        st.success("✅ Файл готов!")
-                        st.rerun()
-                    except Exception as e:
-                        st.error(f"❌ Ошибка: {str(e)}")
-        
-        # === ОТДЕЛЬНАЯ СЕКЦИЯ ДЛЯ СКАЧИВАНИЯ ФАЙЛОВ ===
-        if any(key in st.session_state for key in ['excel_buffer', 'kml_content', 'full_report']):
-            st.markdown("---")
-            st.subheader("📥 Готовые файлы для скачивания")
-            
-            download_cols = st.columns(3)
-            
-            # 1. Excel для Google Карт
-            with download_cols[0]:
-                if 'excel_buffer' in st.session_state:
-                    st.download_button(
-                        label="📊 Excel для Google Карт",
-                        data=st.session_state.excel_buffer,
-                        file_name=f"google_maps_export_{year}_Q{quarter}.xlsx",
-                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                        use_container_width=True
-                    )
-                    st.caption("Размер: ~500KB")
-            
-            # 2. KML файл
-            with download_cols[1]:
-                if 'kml_content' in st.session_state:
-                    st.download_button(
-                        label="🗺️ KML для Google Earth",
-                        data=st.session_state.kml_content.encode('utf-8'),
-                        file_name=f"polygons_{year}_Q{quarter}.kml",
-                        mime="application/vnd.google-earth.kml+xml",
-                        use_container_width=True
-                    )
-                    st.caption("Размер: ~300KB")
-            
-            # 3. Полный отчет
-            with download_cols[2]:
-                if 'full_report' in st.session_state:
-                    st.download_button(
-                        label="📋 Полный отчет Excel",
-                        data=st.session_state.full_report,
-                        file_name=f"full_report_{year}_Q{quarter}.xlsx",
-                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                        use_container_width=True
-                    )
-                    st.caption("Размер: ~1MB")
-            
-            # Кнопка очистки
-            if st.button("🗑️ Очистить загруженные файлы", type="secondary"):
-                for key in ['excel_buffer', 'kml_content', 'full_report']:
-                    if key in st.session_state:
-                        del st.session_state[key]
-                st.rerun()
-        
-        # === ИНСТРУКЦИИ ===
-        st.markdown("---")
-        with st.expander("📋 Инструкции по импорту", expanded=False):
-            tab1, tab2, tab3 = st.tabs(["Google Карты", "Google Earth", "Excel"])
-            
-            with tab1:
-                st.markdown("""
-                **Импорт в Google Карты:**
-                1. Откройте [Google My Maps](https://www.google.com/maps/d/)
-                2. Создайте новую карту → "Импорт"
-                3. Выберите скачанный Excel файл
-                4. Укажите столбцы:
-                   - **Широта** → Latitude
-                   - **Долгота** → Longitude  
-                   - **Название** → Name
-                   - **Описание** → Description
-                5. Нажмите "Импортировать"
-                """)
-            
-            with tab2:
-                st.markdown("""
-                **Импорт в Google Earth:**
-                1. Откройте Google Earth Pro
-                2. Файл → Открыть
-                3. Выберите KML файл
-                4. Данные появятся в панели "Мои места"
-                5. Щелкните по объектам для просмотра информации
-                """)
-            
-            with tab3:
-                st.markdown("""
-                **Использование Excel отчета:**
-                - **Лист 1:** Точки с координатами
-                - **Лист 2:** Статистика по городам
-                - **Лист 3:** План посещений
-                - **Лист 4:** Полигоны и аудиторы
-                - **Лист 5:** Сводная таблица
-                """)
-        
-        # === АЛЬТЕРНАТИВА КАРТЕ ===
-        st.markdown("---")
-        with st.expander("📍 Быстрый просмотр данных (без карты)", expanded=False):
-            if st.session_state.polygons:
-                # Показываем таблицу с полигонами
-                poly_data = []
-                for poly_name, poly_info in st.session_state.polygons.items():
-                    poly_data.append({
-                        'Полигон': poly_name,
-                        'Аудитор': poly_info.get('auditor', 'Неизвестно'),
-                        'Город': poly_info.get('city', 'Неизвестно'),
-                        'Точек': len(poly_info.get('points', [])),
-                        'Центроид': f"{poly_info.get('center_lat', 'N/A'):.4f}, {poly_info.get('center_lon', 'N/A'):.4f}" 
-                        if 'center_lat' in poly_info else "N/A"
-                    })
+        # ВКЛАДКА 4: Выгрузка данных
+        if "📤 Выгрузка данных" in available_tabs:
+            with results_tabs[current_tab]:
+                st.subheader("📤 Выгрузка данных для карт и отчетов")
                 
-                if poly_data:
-                    df_poly = pd.DataFrame(poly_data)
-                    st.dataframe(df_poly, use_container_width=True, hide_index=True)
+                st.info("""
+                **Выберите формат выгрузки:**  
+                🔹 **Excel для Google Карт** - данные с координатами для импорта  
+                🔹 **KML для Google Earth** - географические данные с полигонами  
+                🔹 **Полный отчет Excel** - все данные для анализа  
+                """)
+                
+                st.markdown("---")
+                
+                # КОЛОНКА 1: Excel для Google Карт
+                with st.container(border=True):
+                    st.markdown("### 📊 Excel для Google Карт")
+                    st.caption("Формат для импорта в Google Карты / My Maps")
                     
-                    # Кнопка для скачивания этой таблицы
-                    csv = df_poly.to_csv(index=False, sep=';').encode('utf-8')
-                    st.download_button(
-                        label="📋 Скачать список полигонов (CSV)",
-                        data=csv,
-                        file_name=f"polygons_list_{year}_Q{quarter}.csv",
-                        mime="text/csv",
-                        use_container_width=True
-                    )
-            else:
-                st.info("Нет данных о полигонах")
-        
-        # Информация о данных
-        st.markdown("---")
-        st.caption(f"📊 Данные: {len(st.session_state.points_df) if st.session_state.points_df is not None else 0} точек, "
-                  f"{len(st.session_state.polygons) if st.session_state.polygons else 0} полигонов, "
-                  f"{len(st.session_state.auditors_df) if st.session_state.auditors_df is not None else 0} аудиторов")
-    
-    tab_index += 1  # Увеличиваем индекс для следующих вкладок
-    
-        
-def create_google_maps_excel(points_df, polygons):
-    """Создает Excel файл для импорта в Google Maps"""
-    import io
-    
-    excel_buffer = io.BytesIO()
-    
-    with pd.ExcelWriter(excel_buffer, engine='openpyxl') as writer:
-        # Лист 1: Точки для карты
-        map_data = []
-        
-        # Добавляем точки
-        for _, point in points_df.iterrows():
-            # Находим полигон точки
-            point_polygon = "Не назначен"
-            point_auditor = "Неизвестно"
-            
-            for poly_name, poly_info in polygons.items():
-                for pt in poly_info.get('points', []):
-                    if len(pt) >= 3 and pt[0] == point['ID_Точки']:
-                        point_polygon = poly_name
-                        point_auditor = poly_info.get('auditor', 'Неизвестно')
-                        break
-            
-            map_data.append({
-                'Name': f"🏪 {point['Название_Точки']}",
-                'Description': f"""
-                <b>Тип:</b> {point.get('Тип', 'Неизвестно')}<br>
-                <b>Адрес:</b> {point.get('Адрес', 'Не указан')}<br>
-                <b>Полигон:</b> {point_polygon}<br>
-                <b>Аудитор:</b> {point_auditor}<br>
-                <b>ID:</b> {point['ID_Точки']}
-                """.strip(),
-                'Latitude': point['Широта'],
-                'Longitude': point['Долгота'],
-                'Type': 'Point',
-                'Color': 'blue'
-            })
-        
-        # Добавляем центроиды полигонов
-        for poly_name, poly_info in polygons.items():
-            # Вычисляем центроид
-            center_lat, center_lon = calculate_polygon_center(poly_info)
-            
-            if center_lat and center_lon:
-                map_data.append({
-                    'Name': f"🗺️ Полигон: {poly_name}",
-                    'Description': f"""
-                    <b>Полигон:</b> {poly_name}<br>
-                    <b>Аудитор:</b> {poly_info.get('auditor', 'Неизвестно')}<br>
-                    <b>Город:</b> {poly_info.get('city', 'Неизвестно')}<br>
-                    <b>Количество точек:</b> {len(poly_info.get('points', []))}
-                    """.strip(),
-                    'Latitude': center_lat,
-                    'Longitude': center_lon,
-                    'Type': 'Polygon_Center',
-                    'Color': 'red'
-                })
-        
-        df_map = pd.DataFrame(map_data)
-        df_map.to_excel(writer, sheet_name='Google Maps Data', index=False)
-        
-        # Лист 2: Инструкция
-        instructions = pd.DataFrame({
-            'Шаг': [1, 2, 3, 4, 5],
-            'Действие': [
-                'Откройте Google My Maps',
-                'Создайте новую карту → Импорт',
-                'Выберите этот файл Excel',
-                'Сопоставьте столбцы: Latitude, Longitude, Name',
-                'Нажмите "Импортировать"'
-            ]
-        })
-        instructions.to_excel(writer, sheet_name='Инструкция', index=False)
-    
-    return excel_buffer.getvalue()
-
-def create_kml_file(points_df, polygons):
-    """Создает KML файл для Google Earth"""
-    kml_header = '''<?xml version="1.0" encoding="UTF-8"?>
-<kml xmlns="http://www.opengis.net/kml/2.2">
-<Document>
-<name>Полигоны и точки аудиторов</name>
-'''
-    
-    kml_content = kml_header
-    
-    # Добавляем полигоны
-    for poly_name, poly_info in polygons.items():
-        if 'coordinates' in poly_info and len(poly_info['coordinates']) > 0:
-            coords = poly_info['coordinates']
-            coord_string = " ".join([f"{lon},{lat},0" for lat, lon in coords if len([lat, lon]) >= 2])
-            
-            if coord_string:
-                kml_content += f'''
-<Placemark>
-<name>🗺️ {poly_name}</name>
-<description>Аудитор: {poly_info.get('auditor', 'Неизвестно')}
-Город: {poly_info.get('city', 'Неизвестно')}
-Количество точек: {len(poly_info.get('points', []))}</description>
-<styleUrl>#polygonStyle</styleUrl>
-<Polygon>
-<outerBoundaryIs>
-<LinearRing>
-<coordinates>{coord_string}</coordinates>
-</LinearRing>
-</outerBoundaryIs>
-</Polygon>
-</Placemark>
-'''
-    
-    # Добавляем точки
-    for _, point in points_df.iterrows():
-        kml_content += f'''
-<Placemark>
-<name>🏪 {point['Название_Точки'][:30]}</name>
-<description>ID: {point['ID_Точки']}
-Тип: {point.get('Тип', 'Неизвестно')}
-Адрес: {point.get('Адрес', 'Не указан')}</description>
-<Point>
-<coordinates>{point['Долгота']},{point['Широта']},0</coordinates>
-</Point>
-</Placemark>
-'''
-    
-    kml_content += '''
-<Style id="polygonStyle">
-<LineStyle>
-<color>ff0000ff</color>
-<width>2</width>
-</LineStyle>
-<PolyStyle>
-<color>400000ff</color>
-<fill>1</fill>
-<outline>1</outline>
-</PolyStyle>
-</Style>
-</Document>
-</kml>
-'''
-    
-    return kml_content
-
-def create_full_excel_report(points_df, auditors_df, city_stats_df, 
-                            type_stats_df, summary_df, polygons):
-    """Создает полный отчет Excel со всеми данными"""
-    import io
-    
-    excel_buffer = io.BytesIO()
-    
-    with pd.ExcelWriter(excel_buffer, engine='openpyxl') as writer:
-        # Лист 1: Точки
-        if points_df is not None:
-            points_df.to_excel(writer, sheet_name='Точки', index=False)
-        
-        # Лист 2: Аудиторы
-        if auditors_df is not None:
-            auditors_df.to_excel(writer, sheet_name='Аудиторы', index=False)
-        
-        # Лист 3: Статистика по городам
-        if city_stats_df is not None:
-            city_stats_df.to_excel(writer, sheet_name='Статистика_городов', index=False)
-        
-        # Лист 4: План посещений
-        if summary_df is not None:
-            summary_df.to_excel(writer, sheet_name='План_посещений', index=False)
-        
-        # Лист 5: Полигоны
-        if polygons:
-            poly_data = []
-            for poly_name, poly_info in polygons.items():
-                poly_data.append({
-                    'Полигон': poly_name,
-                    'Аудитор': poly_info.get('auditor', 'Неизвестно'),
-                    'Город': poly_info.get('city', 'Неизвестно'),
-                    'Количество_точек': len(poly_info.get('points', [])),
-                    'Координаты_полигона': str(poly_info.get('coordinates', []))
-                })
-            
-            pd.DataFrame(poly_data).to_excel(writer, sheet_name='Полигоны', index=False)
-    
-    return excel_buffer.getvalue()
-
-def calculate_polygon_center(poly_info):
-    """Вычисляет центроид полигона"""
-    try:
-        # Из координат полигона
-        if 'coordinates' in poly_info and poly_info['coordinates']:
-            coords = poly_info['coordinates']
-            lats = [c[0] for c in coords if len(c) >= 2]
-            lons = [c[1] for c in coords if len(c) >= 2]
-            
-            if lats and lons:
-                return sum(lats) / len(lats), sum(lons) / len(lons)
-        
-        # Из точек полигона
-        if 'points' in poly_info and poly_info['points']:
-            points = poly_info['points']
-            lats = []
-            lons = []
-            
-            for point in points:
-                if len(point) >= 3:
-                    lats.append(point[1])  # широта
-                    lons.append(point[2])  # долгота
-            
-            if lats and lons:
-                return sum(lats) / len(lats), sum(lons) / len(lons)
-    except:
-        pass
-    
-    return None, None
-
-def create_light_map(points_df, polygons, max_points=200):
-    """Создает легкую карту (ограниченное количество точек)"""
-    import folium
-    
-    # Центр карты
-    center_lat = points_df['Широта'].mean()
-    center_lon = points_df['Долгота'].mean()
-    
-    m = folium.Map(location=[center_lat, center_lon], zoom_start=10)
-    
-    # Ограничиваем количество точек для производительности
-    if len(points_df) > max_points:
-        display_points = points_df.sample(max_points)
-        folium.Marker(
-            location=[center_lat, center_lon],
-            popup=f"Показано {max_points} из {len(points_df)} точек",
-            icon=folium.Icon(color='red', icon='info-sign')
-        ).add_to(m)
+                    col1, col2 = st.columns([2, 1])
+                    with col1:
+                        st.markdown("""
+                        **Что включено:**
+                        - Все точки с координатами
+                        - Полигоны с центроидами
+                        - Описания и метаданные
+                        - Готовые столбцы для импорта
+                        """)
+                    
+                    with col2:
+                        if st.button("📥 Скачать Excel", key="download_excel_google", use_container_width=True):
+                            try:
+                                if 'polygons' not in st.session_state or not st.session_state.polygons:
+                                    st.error("❌ Нет данных полигонов")
+                                else:
+                                    excel_buffer = create_google_maps_excel(
+                                        st.session_state.points_df,
+                                        st.session_state.polygons
+                                    )
+                                    
+                                    st.session_state.excel_buffer = excel_buffer
+                                    st.success("✅ Файл готов!")
+                                    st.rerun()
+                            except Exception as e:
+                                st.error(f"❌ Ошибка: {str(e)}")
+                
+                # КОЛОНКА 2: KML для Google Earth
+                with st.container(border=True):
+                    st.markdown("### 🗺️ KML для Google Earth")
+                    st.caption("Географический формат для GIS-систем")
+                    
+                    col1, col2 = st.columns([2, 1])
+                    with col1:
+                        st.markdown("""
+                        **Что включено:**
+                        - Полигоны как замкнутые контуры
+                        - Точки с метками
+                        - Иерархия по городам/аудиторам
+                        - Поддерживается в Google Earth, QGIS
+                        """)
+                    
+                    with col2:
+                        if st.button("📥 Скачать KML", key="download_kml", use_container_width=True):
+                            try:
+                                if 'polygons' not in st.session_state or not st.session_state.polygons:
+                                    st.error("❌ Нет данных полигонов")
+                                else:
+                                    kml_content = create_kml_file(
+                                        st.session_state.points_df,
+                                        st.session_state.polygons
+                                    )
+                                    
+                                    st.session_state.kml_content = kml_content
+                                    st.success("✅ Файл готов!")
+                                    st.rerun()
+                            except Exception as e:
+                                st.error(f"❌ Ошибка: {str(e)}")
+                
+                # КОЛОНКА 3: Полный отчет Excel
+                with st.container(border=True):
+                    st.markdown("### 📋 Полный отчет Excel")
+                    st.caption("Все данные приложения в одном файле")
+                    
+                    col1, col2 = st.columns([2, 1])
+                    with col1:
+                        st.markdown("""
+                        **Что включено:**
+                        - Статистика по городам
+                        - План посещений по неделям
+                        - Распределение по аудиторам
+                        - Данные по точкам
+                        - Полигоны и координаты
+                        """)
+                    
+                    with col2:
+                        if st.button("📥 Скачать полный отчет", key="download_full_report", use_container_width=True):
+                            try:
+                                full_excel = create_full_excel_report(
+                                    st.session_state.points_df,
+                                    st.session_state.auditors_df,
+                                    st.session_state.city_stats_df,
+                                    st.session_state.type_stats_df,
+                                    st.session_state.summary_df,
+                                    st.session_state.polygons
+                                )
+                                
+                                st.session_state.full_report = full_excel
+                                st.success("✅ Файл готов!")
+                                st.rerun()
+                            except Exception as e:
+                                st.error(f"❌ Ошибка: {str(e)}")
+                
+                # === ОТДЕЛЬНАЯ СЕКЦИЯ ДЛЯ СКАЧИВАНИЯ ФАЙЛОВ ===
+                if any(key in st.session_state for key in ['excel_buffer', 'kml_content', 'full_report']):
+                    st.markdown("---")
+                    st.subheader("📥 Готовые файлы для скачивания")
+                    
+                    download_cols = st.columns(3)
+                    
+                    # 1. Excel для Google Карт
+                    with download_cols[0]:
+                        if 'excel_buffer' in st.session_state:
+                            st.download_button(
+                                label="📊 Excel для Google Карт",
+                                data=st.session_state.excel_buffer,
+                                file_name=f"google_maps_export_{year}_Q{quarter}.xlsx",
+                                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                                use_container_width=True
+                            )
+                            st.caption("Размер: ~500KB")
+                    
+                    # 2. KML файл
+                    with download_cols[1]:
+                        if 'kml_content' in st.session_state:
+                            st.download_button(
+                                label="🗺️ KML для Google Earth",
+                                data=st.session_state.kml_content.encode('utf-8'),
+                                file_name=f"polygons_{year}_Q{quarter}.kml",
+                                mime="application/vnd.google-earth.kml+xml",
+                                use_container_width=True
+                            )
+                            st.caption("Размер: ~300KB")
+                    
+                    # 3. Полный отчет
+                    with download_cols[2]:
+                        if 'full_report' in st.session_state:
+                            st.download_button(
+                                label="📋 Полный отчет Excel",
+                                data=st.session_state.full_report,
+                                file_name=f"full_report_{year}_Q{quarter}.xlsx",
+                                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                                use_container_width=True
+                            )
+                            st.caption("Размер: ~1MB")
+                    
+                    # Кнопка очистки
+                    if st.button("🗑️ Очистить загруженные файлы", type="secondary"):
+                        for key in ['excel_buffer', 'kml_content', 'full_report']:
+                            if key in st.session_state:
+                                del st.session_state[key]
+                        st.rerun()
+                
+                # === ИНСТРУКЦИИ ===
+                st.markdown("---")
+                with st.expander("📋 Инструкции по импорту", expanded=False):
+                    tab1, tab2, tab3 = st.tabs(["Google Карты", "Google Earth", "Excel"])
+                    
+                    with tab1:
+                        st.markdown("""
+                        **Импорт в Google Карты:**
+                        1. Откройте [Google My Maps](https://www.google.com/maps/d/)
+                        2. Создайте новую карту → "Импорт"
+                        3. Выберите скачанный Excel файл
+                        4. Укажите столбцы:
+                           - **Широта** → Latitude
+                           - **Долгота** → Longitude  
+                           - **Название** → Name
+                           - **Описание** → Description
+                        5. Нажмите "Импортировать"
+                        """)
+                    
+                    with tab2:
+                        st.markdown("""
+                        **Импорт в Google Earth:**
+                        1. Откройте Google Earth Pro
+                        2. Файл → Открыть
+                        3. Выберите KML файл
+                        4. Данные появятся в панели "Мои места"
+                        5. Щелкните по объектам для просмотра информации
+                        """)
+                    
+                    with tab3:
+                        st.markdown("""
+                        **Использование Excel отчета:**
+                        - **Лист 1:** Точки с координатами
+                        - **Лист 2:** Статистика по городам
+                        - **Лист 3:** План посещений
+                        - **Лист 4:** Полигоны и аудиторы
+                        - **Лист 5:** Сводная таблица
+                        """)
+                
+                # === АЛЬТЕРНАТИВА КАРТЕ ===
+                st.markdown("---")
+                with st.expander("📍 Быстрый просмотр данных (без карты)", expanded=False):
+                    if st.session_state.polygons:
+                        # Показываем таблицу с полигонами
+                        poly_data = []
+                        for poly_name, poly_info in st.session_state.polygons.items():
+                            poly_data.append({
+                                'Полигон': poly_name,
+                                'Аудитор': poly_info.get('auditor', 'Неизвестно'),
+                                'Город': poly_info.get('city', 'Неизвестно'),
+                                'Точек': len(poly_info.get('points', [])),
+                                'Центроид': f"{poly_info.get('center_lat', 'N/A'):.4f}, {poly_info.get('center_lon', 'N/A'):.4f}" 
+                                if 'center_lat' in poly_info else "N/A"
+                            })
+                        
+                        if poly_data:
+                            df_poly = pd.DataFrame(poly_data)
+                            st.dataframe(df_poly, use_container_width=True, hide_index=True)
+                            
+                            # Кнопка для скачивания этой таблицы
+                            csv = df_poly.to_csv(index=False, sep=';').encode('utf-8')
+                            st.download_button(
+                                label="📋 Скачать список полигонов (CSV)",
+                                data=csv,
+                                file_name=f"polygons_list_{year}_Q{quarter}.csv",
+                                mime="text/csv",
+                                use_container_width=True
+                            )
+                    else:
+                        st.info("Нет данных о полигонах")
+                
+                # Информация о данных
+                st.markdown("---")
+                st.caption(f"📊 Данные: {len(st.session_state.points_df) if st.session_state.points_df is not None else 0} точек, "
+                          f"{len(st.session_state.polygons) if st.session_state.polygons else 0} полигонов, "
+                          f"{len(st.session_state.auditors_df) if st.session_state.auditors_df is not None else 0} аудиторов")
+            current_tab += 1
     else:
-        display_points = points_df
+        st.warning("⚠️ Нет данных для отображения в результатах")
+else:
+    st.info("📋 Загрузите данные и нажмите 'Рассчитать план' для отображения результатов")
     
-    # Простые маркеры для точек
-    for _, point in display_points.iterrows():
-        folium.CircleMarker(
-            location=[point['Широта'], point['Долгота']],
-            radius=3,
-            popup=point['ID_Точки'],
-            color='blue',
-            fill=True
-        ).add_to(m)
-    
-    # Полигоны
-    for poly_name, poly_info in polygons.items():
-        if 'coordinates' in poly_info and len(poly_info['coordinates']) > 2:
-            folium.Polygon(
-                locations=poly_info['coordinates'],
-                popup=f"Полигон: {poly_name}",
-                color='red',
-                weight=2,
-                fill=True,
-                fill_opacity=0.1
-            ).add_to(m)
-    
-    return m
-
-
-
-
