@@ -1534,26 +1534,55 @@ if st.session_state.plan_calculated:
                         st.metric("Полигонов", total_polygons)
             tab_index += 1
         
-                # ВКЛАДКА 4: Карта полигонов
-with results_tabs[3]:  # ← ИСПРАВЬТЕ С 4 НА 3
-    st.subheader("🗺️ Карта полигонов аудиторов")
-    
-    if st.session_state.polygons is not None and len(st.session_state.polygons) > 0:
-        polygons = st.session_state.polygons
+                   # ВКЛАДКА 4: Карта полигонов
+    with results_tabs[3]:
+        st.subheader("🗺️ Карта полигонов аудиторов")
         
-        if not FOLIUM_AVAILABLE:
-            st.warning("""
-            ⚠️ Для отображения карты установите библиотеки:
-            ```
-            pip install folium streamlit-folium
-            ```
-            После установки перезапустите приложение.
-            """)
+        if st.session_state.polygons is not None and len(st.session_state.polygons) > 0:
+            polygons = st.session_state.polygons
             
-            # Показываем таблицу с полигонами как альтернативу
-            poly_data = []
-            for poly_name, poly_info in polygons.items():
-                poly_data.append({
-                    'Полигон': poly_name,
-                    'Аудитор': poly_info.get('auditor', 'Неизвестно'),
-                    'Количество точек': len(poly_info
+            if not FOLIUM_AVAILABLE:
+                st.warning("""
+                ⚠️ Для отображения карты установите библиотеки:
+                ```
+                pip install folium streamlit-folium
+                ```
+                После установки перезапустите приложение.
+                """)
+                
+                # Показываем таблицу с полигонами как альтернативу
+                poly_data = []
+                for poly_name, poly_info in polygons.items():
+                    poly_data.append({
+                        'Полигон': poly_name,
+                        'Аудитор': poly_info.get('auditor', 'Неизвестно'),
+                        'Количество точек': len(poly_info.get('points', [])),
+                        'Город': poly_info.get('city', 'Неизвестно')
+                    })
+                
+                if poly_data:
+                    st.dataframe(pd.DataFrame(poly_data), use_container_width=True)
+            else:
+                # Код для отображения карты с folium
+                if st.session_state.points_df is not None:
+                    points_df = st.session_state.points_df
+                    
+                    # Находим центр карты
+                    center_lat = points_df['Широта'].mean()
+                    center_lon = points_df['Долгота'].mean()
+                    
+                    m = folium.Map(location=[center_lat, center_lon], zoom_start=10)
+                    
+                    # Простой код для отображения точек
+                    for _, point in points_df.iterrows():
+                        folium.CircleMarker(
+                            location=[point['Широта'], point['Долгота']],
+                            radius=5,
+                            popup=f"{point['ID_Точки']}: {point['Название_Точки']}",
+                            color='blue',
+                            fill=True
+                        ).add_to(m)
+                    
+                    folium_static(m, width=1200, height=600)
+        else:
+            st.info("Полигоны еще не сгенерированы. Нажмите кнопку 'Рассчитать план'")
