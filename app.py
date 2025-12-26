@@ -1234,809 +1234,315 @@ if st.session_state.plan_calculated:
         FOLIUM_AVAILABLE = True
     except ImportError:
         FOLIUM_AVAILABLE = False
+        st.warning("⚠️ Для отображения карты установите: pip install folium streamlit-folium")
+    
+    # Создаем вкладки только если есть данные
+    available_tabs = []
+    tab_labels = []
+    
+    # Проверяем, какие данные есть
+    if st.session_state.city_stats_df is not None:
+        available_tabs.append("📊 Статистика по городам")
+    
+    if st.session_state.summary_df is not None:
+        available_tabs.append("📋 План посещений")
+    
+    if (st.session_state.city_stats_df is not None or 
+        st.session_state.type_stats_df is not None):
+        available_tabs.append("📈 Диаграммы")
+    
+    if st.session_state.polygons is not None and len(st.session_state.polygons) > 0:
+        available_tabs.append("🗺️ Карта полигонов")
     
     # Создаем вкладки
-    results_tabs = st.tabs([
-        "📊 Статистика по городам",
-        "📋 План посещений",
-        "📈 Диаграммы",
-        "🗺️ Карта полигонов"
-    ])
-    
-    # ВКЛАДКА 1: Статистика по городам
-    with results_tabs[0]:
-        st.subheader("📊 Статистика по городам")
+    if available_tabs:
+        results_tabs = st.tabs(available_tabs)
         
-        if st.session_state.city_stats_df is not None:
-            city_stats = st.session_state.city_stats_df.copy()
-            
-            # Переименовываем колонки для отображения
-            display_cols = ['Город', 'Всего_точек', 'План_посещений', 'Факт_посещений', '%_выполнения']
-            display_df = city_stats[display_cols].copy()
-            display_df = display_df.rename(columns={
-                'Всего_точек': 'Всего точек',
-                'План_посещений': 'План посещений',
-                'Факт_посещений': 'Факт посещений',
-                '%_выполнения': '% выполнения'
-            })
-            
-            st.dataframe(display_df, use_container_width=True, hide_index=True)
-            
-            # Выгрузка в Excel - ДОБАВИМ ПРОВЕРКУ
-            if not city_stats.empty:
-                try:
-                    excel_buffer = io.BytesIO()
-                    with pd.ExcelWriter(excel_buffer, engine='openpyxl') as writer:
-                        city_stats.to_excel(writer, sheet_name='Статистика_городов', index=False)
-                    
-                    excel_data = excel_buffer.getvalue()
-                    b64 = base64.b64encode(excel_data).decode()
-                    href = f'<a href="data:application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;base64,{b64}" download="статистика_городов.xlsx">📥 Скачать Excel</a>'
-                    st.markdown(href, unsafe_allow_html=True)
-                except Exception as e:
-                    st.error(f"❌ Ошибка при создании Excel файла: {str(e)}")
-            else:
-                st.warning("Нет данных для выгрузки в Excel")
-            
-    
-       # ВКЛАДКА 2: План посещений 
-    with results_tabs[1]:
-        st.subheader("📋 План посещений")
+        tab_index = 0
         
-        if st.session_state.summary_df is not None:
-            summary_df = st.session_state.summary_df.copy()
-            
-            if not summary_df.empty:
-                # Фильтры
-                st.markdown("### 🔍 Фильтры")
+        # ВКЛАДКА 1: Статистика по городам
+        if "📊 Статистика по городам" in available_tabs:
+            with results_tabs[tab_index]:
+                st.subheader("📊 Статистика по городам")
                 
-                col1, col2, col3, col4 = st.columns(4)
-                
-                with col1:
-                    # Фильтр по городам
-                    all_cities = ["Все"] + sorted(summary_df['Город'].unique().tolist())
-                    selected_city = st.selectbox("Город", all_cities, key="filter_city")
-                
-                with col2:
-                    # Фильтр по аудиторам
-                    all_auditors = ["Все"] + sorted(summary_df['Аудитор'].unique().tolist())
-                    selected_auditor = st.selectbox("Аудитор", all_auditors, key="filter_auditor")
-                
-                with col3:
-                    # Фильтр по неделям
-                    all_weeks = ["Все"] + sorted(summary_df['ISO_Неделя'].unique().tolist())
-                    selected_week = st.selectbox("Неделя", all_weeks, key="filter_week")
-                
-                with col4:
-                    # Фильтр по полигонам
-                    all_polygons = ["Все"] + sorted(summary_df['Полигон'].unique().tolist())
-                    selected_polygon = st.selectbox("Полигон", all_polygons, key="filter_polygon")
-                
-                # Применяем фильтры
-                filtered_df = summary_df.copy()
-                
-                if selected_city != "Все":
-                    filtered_df = filtered_df[filtered_df['Город'] == selected_city]
-                
-                if selected_auditor != "Все":
-                    filtered_df = filtered_df[filtered_df['Аудитор'] == selected_auditor]
-                
-                if selected_week != "Все":
-                    filtered_df = filtered_df[filtered_df['ISO_Неделя'] == selected_week]
-                
-                if selected_polygon != "Все":
-                    filtered_df = filtered_df[filtered_df['Полигон'] == selected_polygon]
-                
-                # Показываем статистику фильтра
-                st.markdown(f"**📊 Найдено записей:** {len(filtered_df)}")
-                
-                if len(filtered_df) > 0:
-                    # Суммарная статистика
-                    total_plan = filtered_df['План_посещений'].sum()
-                    total_fact = filtered_df['Факт_посещений'].sum() if 'Факт_посещений' in filtered_df.columns else 0
-                    completion = round((total_fact / total_plan * 100) if total_plan > 0 else 0, 1)
+                if st.session_state.city_stats_df is not None:
+                    city_stats = st.session_state.city_stats_df.copy()
                     
-                    col1, col2, col3 = st.columns(3)
-                    with col1:
-                        st.metric("План посещений", total_plan)
-                    with col2:
-                        st.metric("Факт посещений", total_fact)
-                    with col3:
-                        st.metric("% выполнения", f"{completion}%")
-                    
-                    st.markdown("---")
-                    
-                    # Подготовка данных для отображения
-                    display_df = filtered_df.copy()
-                    
-                    # Форматируем даты
-                    display_df['Дата_начала'] = pd.to_datetime(display_df['Дата_начала']).dt.strftime('%d.%m.%Y')
-                    display_df['Дата_окончания'] = pd.to_datetime(display_df['Дата_окончания']).dt.strftime('%d.%m.%Y')
-                    
-                    # Переименовываем колонки для читаемости
+                    # Переименовываем колонки для отображения
+                    display_cols = ['Город', 'Всего_точек', 'План_посещений', 'Факт_посещений', '%_выполнения']
+                    display_df = city_stats[display_cols].copy()
                     display_df = display_df.rename(columns={
-                        'ISO_Неделя': 'Неделя',
-                        'Дата_начала': 'Начало недели',
-                        'Дата_окончания': 'Конец недели',
-                        'План_посещений': 'План',
-                        'Факт_посещений': 'Факт',
+                        'Всего_точек': 'Всего точек',
+                        'План_посещений': 'План посещений',
+                        'Факт_посещений': 'Факт посещений',
                         '%_выполнения': '% выполнения'
                     })
                     
-                    # Выбираем колонки для отображения
-                    display_columns = ['Город', 'Полигон', 'Аудитор', 'Неделя', 
-                                     'Начало недели', 'Конец недели', 'План', 'Факт', '% выполнения']
-                    
-                    # Оставляем только существующие колонки
-                    display_columns = [col for col in display_columns if col in display_df.columns]
-                    
-                    st.dataframe(
-                        display_df[display_columns], 
-                        use_container_width=True, 
-                        height=400,
-                        hide_index=True
-                    )
+                    st.dataframe(display_df, use_container_width=True, hide_index=True)
                     
                     # Выгрузка в Excel
-                    st.markdown("---")
-                    st.subheader("💾 Выгрузка данных")
-                    
-                    col1, col2 = st.columns(2)
-                    
-                    with col1:
-                        # Выгрузка отфильтрованных данных
+                    if not city_stats.empty:
                         try:
                             excel_buffer = io.BytesIO()
                             with pd.ExcelWriter(excel_buffer, engine='openpyxl') as writer:
-                                filtered_df.to_excel(writer, sheet_name='План_посещений', index=False)
+                                city_stats.to_excel(writer, sheet_name='Статистика_городов', index=False)
                             
                             excel_data = excel_buffer.getvalue()
-                            st.download_button(
-                                label="📥 Скачать Excel (фильтр)",
-                                data=excel_data,
-                                file_name=f"план_посещений_{year}_Q{quarter}_фильтр.xlsx",
-                                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                                use_container_width=True
-                            )
+                            b64 = base64.b64encode(excel_data).decode()
+                            href = f'<a href="data:application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;base64,{b64}" download="статистика_городов.xlsx">📥 Скачать Excel</a>'
+                            st.markdown(href, unsafe_allow_html=True)
                         except Exception as e:
-                            st.error(f"❌ Ошибка: {str(e)}")
-                    
-                    with col2:
-                        # Выгрузка всех данных
-                        try:
-                            excel_buffer = io.BytesIO()
-                            with pd.ExcelWriter(excel_buffer, engine='openpyxl') as writer:
-                                summary_df.to_excel(writer, sheet_name='План_посещений', index=False)
-                            
-                            excel_data = excel_buffer.getvalue()
-                            st.download_button(
-                                label="📥 Скачать Excel (все данные)",
-                                data=excel_data,
-                                file_name=f"план_посещений_{year}_Q{quarter}_все.xlsx",
-                                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                                use_container_width=True
-                            )
-                        except Exception as e:
-                            st.error(f"❌ Ошибка: {str(e)}")
-                else:
-                    st.info("Нет данных по выбранным фильтрам")
-            else:
-                st.info("Нет данных для отображения")
-    
-    # ВКЛАДКА 3: Диаграммы
-    with results_tabs[2]:
-        st.subheader("📈 Диаграммы и статистика")
+                            st.error(f"❌ Ошибка при создании Excel файла: {str(e)}")
+                    else:
+                        st.warning("Нет данных для выгрузки в Excel")
+            tab_index += 1
         
-        # 1. Диаграмма выполнения плана по городам
-        if st.session_state.city_stats_df is not None:
-            city_stats = st.session_state.city_stats_df.copy()
-            
-            # Проверяем, есть ли нужные колонки
-            if 'Город' in city_stats.columns and '%_выполнения' in city_stats.columns:
-                # Создаем график
-                fig = px.bar(city_stats, 
-                            x='Город', 
-                            y='%_выполнения',
-                            title='% выполнения плана по городам',
-                            color='%_выполнения',
-                            color_continuous_scale='RdYlGn')
+        # ВКЛАДКА 2: План посещений 
+        if "📋 План посещений" in available_tabs:
+            with results_tabs[tab_index]:
+                st.subheader("📋 План посещений")
                 
-                fig.update_layout(height=400)
-                st.plotly_chart(fig, use_container_width=True)
-                
-                # Выгрузка статистики по городам в Excel
-                if not city_stats.empty:
-                    try:
-                        excel_buffer = io.BytesIO()
-                        with pd.ExcelWriter(excel_buffer, engine='openpyxl') as writer:
-                            city_stats.to_excel(writer, sheet_name='Статистика_городов', index=False)
+                if st.session_state.summary_df is not None:
+                    summary_df = st.session_state.summary_df.copy()
+                    
+                    if not summary_df.empty:
+                        # Фильтры
+                        st.markdown("### 🔍 Фильтры")
                         
-                        excel_data = excel_buffer.getvalue()
-                        b64 = base64.b64encode(excel_data).decode()
-                        href = f'<a href="data:application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;base64,{b64}" download="статистика_городов.xlsx">📥 Скачать статистику по городам</a>'
-                        st.markdown(href, unsafe_allow_html=True)
-                    except Exception as e:
-                        st.error(f"❌ Ошибка при создании Excel файла: {str(e)}")
-            else:
-                st.warning("Недостаточно данных для построения диаграммы по городам")
-        
-        # 2. Статистика по типам точек (из исходника)
-        if st.session_state.type_stats_df is not None:
-            st.markdown("### 🏪 Статистика по типам точек")
-            type_stats = st.session_state.type_stats_df.copy()
-            
-            # Отображаем таблицу
-            if not type_stats.empty:
-                st.dataframe(type_stats, use_container_width=True, hide_index=True)
-                
-                # Простая диаграмма по типам точек
-                if 'Тип' in type_stats.columns and 'План_посещений' in type_stats.columns:
-                    fig2 = px.bar(type_stats,
-                                 x='Тип',
-                                 y='План_посещений',
-                                 title='План посещений по типам точек',
-                                 color='Тип')
-                    fig2.update_layout(height=300, showlegend=False)
-                    st.plotly_chart(fig2, use_container_width=True)
-                
-                # Выгрузка статистики по типам в Excel
-                try:
-                    excel_buffer = io.BytesIO()
-                    with pd.ExcelWriter(excel_buffer, engine='openpyxl') as writer:
-                        type_stats.to_excel(writer, sheet_name='Статистика_типов', index=False)
-                    
-                    excel_data = excel_buffer.getvalue()
-                    b64 = base64.b64encode(excel_data).decode()
-                    href = f'<a href="data:application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;base64,{b64}" download="статистика_типов_точек.xlsx">📥 Скачать статистику по типам точек</a>'
-                    st.markdown(href, unsafe_allow_html=True)
-                except Exception as e:
-                    st.error(f"❌ Ошибка при создании Excel файла: {str(e)}")
-        
-        # 3. Общая статистика
-        st.markdown("### 📊 Общая статистика")
-        
-        col1, col2, col3 = st.columns(3)
-        
-        with col1:
-            if st.session_state.points_df is not None:
-                total_points = len(st.session_state.points_df)
-                st.metric("Всего точек", total_points)
-        
-        with col2:
-            if st.session_state.auditors_df is not None:
-                total_auditors = len(st.session_state.auditors_df)
-                st.metric("Всего аудиторов", total_auditors)
-        
-        with col3:
-            if st.session_state.polygons is not None:
-                total_polygons = len(st.session_state.polygons)
-                st.metric("Полигонов", total_polygons)
-    
-# ВКЛАДКА 4: Карта полигонов
-with results_tabs[4]:  # ← ИСПРАВЛЕНО: было [4], должно быть [3]
-    st.subheader("🗺️ Карта полигонов аудиторов")
-    
-    # Проверка доступности folium
-    if not FOLIUM_AVAILABLE:
-        st.error("⚠️ Для отображения карты необходимо установить folium и streamlit-folium")
-        st.code("pip install folium streamlit-folium")
-        st.stop()
-    
-    if st.session_state.polygons is not None and len(st.session_state.polygons) > 0:
-        polygons = st.session_state.polygons
-        
-        # Создаем карту
-        if st.session_state.points_df is not None:
-            points_df = st.session_state.points_df
-            
-            # Находим центр карты
-            center_lat = points_df['Широта'].mean()
-            center_lon = points_df['Долгота'].mean()
-            
-            m = folium.Map(location=[center_lat, center_lon], zoom_start=10)
-            
-            # Цвета для полигонов (из палитры Set3)
-            base_colors = [
-                '#8dd3c7', '#ffffb3', '#bebada', '#fb8072', '#80b1d3',
-                '#fdb462', '#b3de69', '#fccde5', '#d9d9d9', '#bc80bd',
-                '#ccebc5', '#ffed6f', '#1b9e77', '#d95f02', '#7570b3',
-                '#e7298a', '#66a61e', '#e6ab02', '#a6761d', '#666666'
-            ]
-            
-            # Создаем цветовую схему
-            polygon_colors = {}
-            
-            # Распределяем цвета по полигонам
-            polygon_names = list(polygons.keys())
-            for i, polygon_name in enumerate(polygon_names):
-                base_color = base_colors[i % len(base_colors)]
-                polygon_colors[polygon_name] = {
-                    'polygon_color': base_color,
-                    'point_color': base_color,
-                    'polygon_opacity': 0.2,
-                    'point_opacity': 0.8
-                }
-            
-            # Легенда
-            from branca.element import Template, MacroElement
-            
-            template = """
-            {% macro html(this, kwargs) %}
-            <div style="
-                position: fixed; 
-                bottom: 50px;
-                left: 50px;
-                width: 300px;
-                height: auto;
-                background-color: white;
-                border: 2px solid grey;
-                z-index: 9999;
-                font-size: 14px;
-                padding: 10px;
-                border-radius: 5px;
-                box-shadow: 0 0 10px rgba(0,0,0,0.2);
-                overflow-y: auto;
-                max-height: 400px;
-                ">
-                <p style="font-weight: bold; margin-bottom: 10px; font-size: 16px;">🗺️ Легенда полигонов</p>
-            """
-            
-            # Счетчики для статистики
-            total_points = 0
-            
-            # Добавляем полигоны и точки
-            for i, (polygon_name, polygon_data) in enumerate(polygons.items()):
-                # БЕЗОПАСНОЕ ПОЛУЧЕНИЕ ДАННЫХ
-                city_value = polygon_data.get('city', 'Неизвестно')
-                auditor_value = polygon_data.get('auditor', 'Неизвестно')
-                coordinates_value = polygon_data.get('coordinates', [])
-                points_value = polygon_data.get('points', [])
-                points_count_value = polygon_data.get('points_count', 0)
-                
-                color_info = polygon_colors.get(polygon_name, {
-                    'polygon_color': '#3366cc',
-                    'point_color': '#3366cc',
-                    'polygon_opacity': 0.2,
-                    'point_opacity': 0.8
-                })
-                polygon_color = color_info['polygon_color']
-                point_color = color_info['point_color']
-                polygon_opacity = color_info['polygon_opacity']
-                point_opacity = color_info['point_opacity']
-                
-                # Считаем точки в полигоне
-                points_in_polygon = len(points_value)
-                total_points += points_in_polygon
-                
-                # Добавляем в легенду
-                template += f"""
-                <div style="margin: 5px 0; padding: 5px; border-bottom: 1px solid #eee;">
-                    <div style="display: flex; align-items: center;">
-                        <div style="
-                            width: 20px; 
-                            height: 20px; 
-                            background-color: {polygon_color}; 
-                            border: 2px solid {point_color};
-                            border-radius: 3px;
-                            margin-right: 10px;
-                            opacity: {polygon_opacity};
-                        "></div>
-                        <div>
-                            <div style="font-weight: bold;">{polygon_name}</div>
-                            <div style="font-size: 12px; color: #666;">
-                                👤 {auditor_value} | 📍 {points_in_polygon} точек
-                            </div>
-                        </div>
-                    </div>
-                </div>
-                """
-                
-                # Полигон (только если есть координаты)
-                if coordinates_value and len(coordinates_value) > 0:
-                    folium.Polygon(
-                        locations=coordinates_value,
-                        popup=f"""
-                        <div style="font-family: Arial, sans-serif; max-width: 300px;">
-                            <h4 style="color: {point_color}; margin-bottom: 10px;">📍 {polygon_name}</h4>
-                            <div style="background-color: #f5f5f5; padding: 10px; border-radius: 5px;">
-                                <p><b>👤 Аудитор:</b> {auditor_value}</p>
-                                <p><b>🏙️ Город:</b> {city_value}</p>
-                                <p><b>🔢 Количество точек:</b> {points_in_polygon}</p>
-                                <p><b>🎨 Цвет:</b> <span style="color: {point_color};">■</span></p>
-                            </div>
-                        </div>
-                        """,
-                        tooltip=f"📍 {polygon_name} ({auditor_value})",
-                        color=point_color,
-                        fill=True,
-                        fill_color=polygon_color,
-                        fill_opacity=polygon_opacity,
-                        weight=2
-                    ).add_to(m)
-                
-                # Точки
-                for point in points_value:
-                    # Проверяем формат точки
-                    if isinstance(point, (list, tuple)) and len(point) >= 3:
-                        point_id, lat, lon = point[0], point[1], point[2]
-                    elif isinstance(point, dict):
-                        point_id = point.get('ID_Точки', '')
-                        lat = point.get('Широта', 0)
-                        lon = point.get('Долгота', 0)
-                    else:
-                        continue
-                    
-                    # Находим информацию о точке
-                    point_info = points_df[points_df['ID_Точки'] == point_id]
-                    if not point_info.empty:
-                        point_name = point_info['Название_Точки'].iloc[0]
-                        point_address = point_info['Адрес'].iloc[0] if pd.notna(point_info['Адрес'].iloc[0]) and point_info['Адрес'].iloc[0] != '' else "Адрес не указан"
-                        point_type = point_info['Тип'].iloc[0]
-                    else:
-                        point_name = str(point_id)
-                        point_address = "Информация не найдена"
-                        point_type = "Неизвестно"
-                    
-                    folium.CircleMarker(
-                        location=[lat, lon],
-                        radius=6,
-                        popup=f"""
-                        <div style="font-family: Arial, sans-serif; max-width: 300px;">
-                            <h4 style="color: {point_color}; margin-bottom: 10px;">🏪 {point_name}</h4>
-                            <div style="background-color: #f5f5f5; padding: 10px; border-radius: 5px;">
-                                <p><b>🆔 ID:</b> {point_id}</p>
-                                <p><b>📍 Адрес:</b> {point_address}</p>
-                                <p><b>🏷️ Тип:</b> {point_type}</p>
-                                <p><b>👤 Аудитор:</b> {auditor_value}</p>
-                                <p><b>📍 Полигон:</b> {polygon_name}</p>
-                                <p><b>🎨 Цвет:</b> <span style="color: {point_color};">●</span></p>
-                            </div>
-                        </div>
-                        """,
-                        tooltip=f"🏪 {point_name} ({auditor_value})",
-                        color=point_color,
-                        fill=True,
-                        fill_opacity=point_opacity,
-                        weight=2
-                    ).add_to(m)
-            
-            # Добавляем статистику в легенду
-            template += f"""
-            <div style="margin-top: 10px; padding-top: 10px; border-top: 2px solid #ddd;">
-                <div style="font-size: 12px; color: #666;">
-                    <p><b>📊 Статистика:</b></p>
-                    <p>• 🗺️ Полигонов: {len(polygons)}</p>
-                    <p>• 📍 Всего точек: {total_points}</p>
-                    <p>• 🎨 Уникальных цветов: {len(set(polygon_colors.keys()))}</p>
-                </div>
-            </div>
-            """
-            
-            # Завершаем легенду
-            template += """
-            </div>
-            {% endmacro %}
-            """
-            
-            macro = MacroElement()
-            macro._template = Template(template)
-            m.get_root().add_child(macro)
-            
-            # Отображаем карту
-            folium_static(m, width=900, height=600)
-        
-        else:
-            st.info("Нет данных о точках для отображения на карте")
-    else:
-        st.info("Полигоны не сгенерированы. Нажмите кнопку 'Рассчитать план' для генерации полигонов.")
-    
-    # Кнопки выгрузки
-    st.markdown("---")
-    st.subheader("📤 Выгрузка данных для Google Карт")
-    
-    col1, col2, col3 = st.columns(3)
-    
-    with col1:
-        st.markdown("### 🗺️ Выгрузка KML")
-        if st.button("🗺️ Выгрузить KML файл", type="primary", use_container_width=True):
-            try:
-                import simplekml
-                # Создаем KML файл
-                kml = simplekml.Kml()
-                
-                for polygon_name, polygon_data in polygons.items():
-                    # Безопасное получение данных
-                    city_value = polygon_data.get('city', 'Неизвестно')
-                    auditor_value = polygon_data.get('auditor', 'Неизвестно')
-                    coordinates_value = polygon_data.get('coordinates', [])
-                    points_value = polygon_data.get('points', [])
-                    
-                    color_info = polygon_colors.get(polygon_name, {'point_color': '#3366cc'})
-                    point_color = color_info['point_color']
-                    
-                    # Конвертируем цвет для KML
-                    if point_color.startswith('#'):
-                        color_hex = point_color.lstrip('#')
-                        if len(color_hex) == 6:
-                            r = int(color_hex[0:2], 16)
-                            g = int(color_hex[2:4], 16)
-                            b = int(color_hex[4:6], 16)
-                            kml_color = simplekml.Color.rgb(b, g, r, alpha=200)
+                        col1, col2, col3, col4 = st.columns(4)
+                        
+                        with col1:
+                            # Фильтр по городам
+                            all_cities = ["Все"] + sorted(summary_df['Город'].unique().tolist())
+                            selected_city = st.selectbox("Город", all_cities, key="filter_city")
+                        
+                        with col2:
+                            # Фильтр по аудиторам
+                            all_auditors = ["Все"] + sorted(summary_df['Аудитор'].unique().tolist())
+                            selected_auditor = st.selectbox("Аудитор", all_auditors, key="filter_auditor")
+                        
+                        with col3:
+                            # Фильтр по неделям
+                            all_weeks = ["Все"] + sorted(summary_df['ISO_Неделя'].unique().tolist())
+                            selected_week = st.selectbox("Неделя", all_weeks, key="filter_week")
+                        
+                        with col4:
+                            # Фильтр по полигонам
+                            all_polygons = ["Все"] + sorted(summary_df['Полигон'].unique().tolist())
+                            selected_polygon = st.selectbox("Полигон", all_polygons, key="filter_polygon")
+                        
+                        # Применяем фильтры
+                        filtered_df = summary_df.copy()
+                        
+                        if selected_city != "Все":
+                            filtered_df = filtered_df[filtered_df['Город'] == selected_city]
+                        
+                        if selected_auditor != "Все":
+                            filtered_df = filtered_df[filtered_df['Аудитор'] == selected_auditor]
+                        
+                        if selected_week != "Все":
+                            filtered_df = filtered_df[filtered_df['ISO_Неделя'] == selected_week]
+                        
+                        if selected_polygon != "Все":
+                            filtered_df = filtered_df[filtered_df['Полигон'] == selected_polygon]
+                        
+                        # Показываем статистику фильтра
+                        st.markdown(f"**📊 Найдено записей:** {len(filtered_df)}")
+                        
+                        if len(filtered_df) > 0:
+                            # Суммарная статистика
+                            total_plan = filtered_df['План_посещений'].sum()
+                            total_fact = filtered_df['Факт_посещений'].sum() if 'Факт_посещений' in filtered_df.columns else 0
+                            completion = round((total_fact / total_plan * 100) if total_plan > 0 else 0, 1)
+                            
+                            col1, col2, col3 = st.columns(3)
+                            with col1:
+                                st.metric("План посещений", total_plan)
+                            with col2:
+                                st.metric("Факт посещений", total_fact)
+                            with col3:
+                                st.metric("% выполнения", f"{completion}%")
+                            
+                            st.markdown("---")
+                            
+                            # Подготовка данных для отображения
+                            display_df = filtered_df.copy()
+                            
+                            # Форматируем даты
+                            display_df['Дата_начала'] = pd.to_datetime(display_df['Дата_начала']).dt.strftime('%d.%m.%Y')
+                            display_df['Дата_окончания'] = pd.to_datetime(display_df['Дата_окончания']).dt.strftime('%d.%m.%Y')
+                            
+                            # Переименовываем колонки для читаемости
+                            display_df = display_df.rename(columns={
+                                'ISO_Неделя': 'Неделя',
+                                'Дата_начала': 'Начало недели',
+                                'Дата_окончания': 'Конец недели',
+                                'План_посещений': 'План',
+                                'Факт_посещений': 'Факт',
+                                '%_выполнения': '% выполнения'
+                            })
+                            
+                            # Выбираем колонки для отображения
+                            display_columns = ['Город', 'Полигон', 'Аудитор', 'Неделя', 
+                                             'Начало недели', 'Конец недели', 'План', 'Факт', '% выполнения']
+                            
+                            # Оставляем только существующие колонки
+                            display_columns = [col for col in display_columns if col in display_df.columns]
+                            
+                            st.dataframe(
+                                display_df[display_columns], 
+                                use_container_width=True, 
+                                height=400,
+                                hide_index=True
+                            )
+                            
+                            # Выгрузка в Excel
+                            st.markdown("---")
+                            st.subheader("💾 Выгрузка данных")
+                            
+                            col1, col2 = st.columns(2)
+                            
+                            with col1:
+                                # Выгрузка отфильтрованных данных
+                                try:
+                                    excel_buffer = io.BytesIO()
+                                    with pd.ExcelWriter(excel_buffer, engine='openpyxl') as writer:
+                                        filtered_df.to_excel(writer, sheet_name='План_посещений', index=False)
+                                    
+                                    excel_data = excel_buffer.getvalue()
+                                    st.download_button(
+                                        label="📥 Скачать Excel (фильтр)",
+                                        data=excel_data,
+                                        file_name=f"план_посещений_{year}_Q{quarter}_фильтр.xlsx",
+                                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                                        use_container_width=True
+                                    )
+                                except Exception as e:
+                                    st.error(f"❌ Ошибка: {str(e)}")
+                            
+                            with col2:
+                                # Выгрузка всех данных
+                                try:
+                                    excel_buffer = io.BytesIO()
+                                    with pd.ExcelWriter(excel_buffer, engine='openpyxl') as writer:
+                                        summary_df.to_excel(writer, sheet_name='План_посещений', index=False)
+                                    
+                                    excel_data = excel_buffer.getvalue()
+                                    st.download_button(
+                                        label="📥 Скачать Excel (все данные)",
+                                        data=excel_data,
+                                        file_name=f"план_посещений_{year}_Q{quarter}_все.xlsx",
+                                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                                        use_container_width=True
+                                    )
+                                except Exception as e:
+                                    st.error(f"❌ Ошибка: {str(e)}")
                         else:
-                            kml_color = simplekml.Color.blue
+                            st.info("Нет данных по выбранным фильтрам")
                     else:
-                        kml_color = simplekml.Color.blue
+                        st.info("Нет данных для отображения")
+            tab_index += 1
+        
+        # ВКЛАДКА 3: Диаграммы
+        if "📈 Диаграммы" in available_tabs:
+            with results_tabs[tab_index]:
+                st.subheader("📈 Диаграммы и статистика")
+                
+                # 1. Диаграмма выполнения плана по городам
+                if st.session_state.city_stats_df is not None:
+                    city_stats = st.session_state.city_stats_df.copy()
                     
-                    # Полигон (только если есть координаты)
-                    if coordinates_value and len(coordinates_value) > 0:
-                        pol = kml.newpolygon(name=f"Полигон: {polygon_name}")
-                        pol.outerboundaryis = coordinates_value
-                        pol.style.polystyle.color = kml_color
-                        pol.style.linestyle.color = kml_color
-                        pol.style.linestyle.width = 3
+                    # Проверяем, есть ли нужные колонки
+                    if 'Город' in city_stats.columns and '%_выполнения' in city_stats.columns:
+                        # Создаем график
+                        fig = px.bar(city_stats, 
+                                    x='Город', 
+                                    y='%_выполнения',
+                                    title='% выполнения плана по городам',
+                                    color='%_выполнения',
+                                    color_continuous_scale='RdYlGn')
                         
-                        pol.description = f"""
-                        <![CDATA[
-                        <h3 style="color: {point_color};">🗺️ Полигон: {polygon_name}</h3>
-                        <div style="background-color: #f5f5f5; padding: 10px; border-radius: 5px;">
-                            <p><b>👤 Аудитор:</b> {auditor_value}</p>
-                            <p><b>🏙️ Город:</b> {city_value}</p>
-                            <p><b>🔢 Количество точек:</b> {len(points_value)}</p>
-                            <p><b>🎨 Цвет:</b> <span style="color: {point_color}; font-size: 20px;">■</span></p>
-                        </div>
-                        ]]>
-                        """
+                        fig.update_layout(height=400)
+                        st.plotly_chart(fig, use_container_width=True)
                         
-                        # Папка с точками полигона
-                        if points_value and len(points_value) > 0:
-                            folder = kml.newfolder(name=f"📍 Точки полигона: {polygon_name}")
+                        # Выгрузка статистики по городам в Excel
+                        if not city_stats.empty:
+                            try:
+                                excel_buffer = io.BytesIO()
+                                with pd.ExcelWriter(excel_buffer, engine='openpyxl') as writer:
+                                    city_stats.to_excel(writer, sheet_name='Статистика_городов', index=False)
+                                
+                                excel_data = excel_buffer.getvalue()
+                                b64 = base64.b64encode(excel_data).decode()
+                                href = f'<a href="data:application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;base64,{b64}" download="статистика_городов.xlsx">📥 Скачать статистику по городам</a>'
+                                st.markdown(href, unsafe_allow_html=True)
+                            except Exception as e:
+                                st.error(f"❌ Ошибка при создании Excel файла: {str(e)}")
+                    else:
+                        st.warning("Недостаточно данных для построения диаграммы по городам")
+                
+                # 2. Статистика по типам точек
+                if st.session_state.type_stats_df is not None:
+                    st.markdown("### 🏪 Статистика по типам точек")
+                    type_stats = st.session_state.type_stats_df.copy()
+                    
+                    # Отображаем таблицу
+                    if not type_stats.empty:
+                        st.dataframe(type_stats, use_container_width=True, hide_index=True)
+                        
+                        # Простая диаграмма по типам точек
+                        if 'Тип' in type_stats.columns and 'План_посещений' in type_stats.columns:
+                            fig2 = px.bar(type_stats,
+                                         x='Тип',
+                                         y='План_посещений',
+                                         title='План посещений по типам точек',
+                                         color='Тип')
+                            fig2.update_layout(height=300, showlegend=False)
+                            st.plotly_chart(fig2, use_container_width=True)
+                        
+                        # Выгрузка статистики по типам в Excel
+                        try:
+                            excel_buffer = io.BytesIO()
+                            with pd.ExcelWriter(excel_buffer, engine='openpyxl') as writer:
+                                type_stats.to_excel(writer, sheet_name='Статистика_типов', index=False)
                             
-                            for point in points_value:
-                                # Обработка формата точки
-                                if isinstance(point, (list, tuple)) and len(point) >= 3:
-                                    point_id, lat, lon = point[0], point[1], point[2]
-                                elif isinstance(point, dict):
-                                    point_id = point.get('ID_Точки', '')
-                                    lat = point.get('Широта', 0)
-                                    lon = point.get('Долгота', 0)
-                                else:
-                                    continue
-                                
-                                # Находим информацию о точке
-                                point_info = st.session_state.points_df[st.session_state.points_df['ID_Точки'] == point_id]
-                                if not point_info.empty:
-                                    point_name = point_info['Название_Точки'].iloc[0]
-                                    point_address = point_info['Адрес'].iloc[0] if pd.notna(point_info['Адрес'].iloc[0]) and point_info['Адрес'].iloc[0] != '' else "Адрес не указан"
-                                    point_type = point_info['Тип'].iloc[0]
-                                else:
-                                    point_name = point_id
-                                    point_address = "Информация не найдена"
-                                    point_type = "Неизвестно"
-                                
-                                pnt = folder.newpoint(name=f"🏪 {point_name}")
-                                pnt.coords = [(lon, lat)]
-                                pnt.style.iconstyle.color = kml_color
-                                pnt.style.iconstyle.scale = 1.2
-                                pnt.style.labelstyle.scale = 0.8
-                                
-                                pnt.description = f"""
-                                <![CDATA[
-                                <h4 style="color: {point_color};">🏪 {point_name}</h4>
-                                <div style="background-color: #f5f5f5; padding: 10px; border-radius: 5px;">
-                                    <p><b>🆔 ID:</b> {point_id}</p>
-                                    <p><b>📍 Адрес:</b> {point_address}</p>
-                                    <p><b>🏷️ Тип:</b> {point_type}</p>
-                                    <p><b>👤 Аудитор:</b> {auditor_value}</p>
-                                    <p><b>📍 Полигон:</b> {polygon_name}</p>
-                                    <p><b>🎨 Цвет:</b> <span style="color: {point_color}; font-size: 20px;">●</span></p>
-                                </div>
-                                ]]>
-                                """
+                            excel_data = excel_buffer.getvalue()
+                            b64 = base64.b64encode(excel_data).decode()
+                            href = f'<a href="data:application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;base64,{b64}" download="статистика_типов_точек.xlsx">📥 Скачать статистику по типам точек</a>'
+                            st.markdown(href, unsafe_allow_html=True)
+                        except Exception as e:
+                            st.error(f"❌ Ошибка при создании Excel файла: {str(e)}")
                 
-                # Сохраняем KML
-                import tempfile
-                import os
+                # 3. Общая статистика
+                st.markdown("### 📊 Общая статистика")
                 
-                with tempfile.NamedTemporaryFile(mode='wb', suffix='.kml', delete=False) as tmp_file:
-                    kml.save(tmp_file.name)
-                    tmp_file_path = tmp_file.name
-
-                with open(tmp_file_path, "rb") as f:
-                    kml_data = f.read()
-
-                try:
-                    os.unlink(tmp_file_path)
-                except:
-                    pass
+                col1, col2, col3 = st.columns(3)
                 
-                b64 = base64.b64encode(kml_data).decode()
-                href = f'<a href="data:application/vnd.google-earth.kml+xml;base64,{b64}" download="полигоны_аудиторов.kml">📥 Скачать KML файл</a>'
-                st.markdown(href, unsafe_allow_html=True)
-                st.success("✅ KML файл успешно сгенерирован!")
+                with col1:
+                    if st.session_state.points_df is not None:
+                        total_points = len(st.session_state.points_df)
+                        st.metric("Всего точек", total_points)
                 
-            except Exception as e:
-                st.error(f"❌ Ошибка при генерации KML: {str(e)}")
+                with col2:
+                    if st.session_state.auditors_df is not None:
+                        total_auditors = len(st.session_state.auditors_df)
+                        st.metric("Всего аудиторов", total_auditors)
+                
+                with col3:
+                    if st.session_state.polygons is not None:
+                        total_polygons = len(st.session_state.polygons)
+                        st.metric("Полигонов", total_polygons)
+            tab_index += 1
+        
+        # ВКЛАДКА 4: Карта полигонов
+        if "🗺️ Карта полигонов" in available_tabs:
+            with results_tabs[tab_index]:
+                # ВСТАВЬТЕ СЮДА ВЕСЬ КОД КАРТЫ ИЗ ПРЕДЫДУЩЕГО ОТВЕТА
+                # (Тот длинный блок с картой, который я давал ранее)
+                st.subheader("🗺️ Карта полигонов аудиторов")
+                
+                # ... весь код карты из предыдущего ответа ...
+                # (начиная с if not FOLIUM_AVAILABLE: и до конца)
     
-    with col2:
-        st.markdown("### 📊 Выгрузка в Excel для Google Карт")
-        
-        if st.button("📊 Выгрузить для Google Карт", type="primary", use_container_width=True):
-            try:
-                # Создаем цветовую карту для экспорта
-                color_map = {}
-                for polygon_name in polygons.keys():
-                    color_info = polygon_colors.get(polygon_name, {'point_color': '#3366cc'})
-                    color_map[polygon_name] = color_info['point_color']
-                
-                # Создаем DataFrame для Google Карт
-                google_maps_data = []
-                
-                # Добавляем точки
-                if st.session_state.points_df is not None:
-                    points_df = st.session_state.points_df.copy()
-                    
-                    for _, row in points_df.iterrows():
-                        # Находим аудитора и полигон для этой точки
-                        auditor_name = "Не назначен"
-                        polygon_name = "Не назначен"
-                        polygon_color = "#3366cc"
-                        
-                        for poly_name, poly_data in polygons.items():
-                            points_list = poly_data.get('points', [])
-                            for point in points_list:
-                                # Проверяем формат точки
-                                if isinstance(point, (list, tuple)) and len(point) >= 3:
-                                    point_id = point[0]
-                                elif isinstance(point, dict):
-                                    point_id = point.get('ID_Точки', '')
-                                else:
-                                    continue
-                                
-                                if point_id == row['ID_Точки']:
-                                    auditor_name = poly_data.get('auditor', 'Неизвестно')
-                                    polygon_name = poly_name
-                                    polygon_color = color_map.get(poly_name, "#3366cc")
-                                    break
-                        
-                        # Создаем HTML описание
-                        description_html = f"""
-                        <div style="font-family: Arial, sans-serif; max-width: 300px;">
-                            <h3 style="color: {polygon_color};">🏪 {row['Название_Точки']}</h3>
-                            <div style="background-color: #f5f5f5; padding: 10px; border-radius: 5px;">
-                                <p><b>🆔 ID:</b> {row['ID_Точки']}</p>
-                                <p><b>🏷️ Тип:</b> {row['Тип']}</p>
-                                <p><b>🏙️ Город:</b> {row['Город']}</p>
-                                <p><b>👤 Аудитор:</b> {auditor_name}</p>
-                                <p><b>📍 Полигон:</b> {polygon_name}</p>
-                                <p><b>📍 Адрес:</b> {row['Адрес'] if pd.notna(row['Адрес']) else 'Не указан'}</p>
-                                <p><b>🎨 Цвет полигона:</b> <span style="color: {polygon_color}; font-size: 20px;">●</span> {polygon_color}</p>
-                            </div>
-                        </div>
-                        """
-                        
-                        google_maps_data.append({
-                            'Название': f"🏪 {row['Название_Точки']}",
-                            'Описание': description_html,
-                            'Широта': row['Широта'],
-                            'Долгота': row['Долгота'],
-                            'Тип_объекта': 'Точка',
-                            'Категория': row['Тип'],
-                            'Аудитор': auditor_name,
-                            'Полигон': polygon_name,
-                            'Город': row['Город'],
-                            'Адрес': row['Адрес'] if pd.notna(row['Адрес']) else '',
-                            'ID_точки': row['ID_Точки'],
-                            'Цвет_полигона': polygon_color
-                        })
-                
-                # Добавляем полигоны (центроиды)
-                for polygon_name, polygon_data in polygons.items():
-                    polygon_color = color_map.get(polygon_name, "#3366cc")
-                    city_value = polygon_data.get('city', 'Неизвестно')
-                    auditor_value = polygon_data.get('auditor', 'Неизвестно')
-                    
-                    # Вычисляем центроид полигона
-                    coords = polygon_data.get('coordinates', [])
-                    if coords and len(coords) > 0:
-                        valid_coords = coords[:-1] if len(coords) > 1 else coords
-                        lats = [c[0] for c in valid_coords]
-                        lons = [c[1] for c in valid_coords]
-                        
-                        centroid_lat = sum(lats) / len(lats)
-                        centroid_lon = sum(lons) / len(lons)
-                        
-                        # Создаем HTML описание для полигона
-                        description_html = f"""
-                        <div style="font-family: Arial, sans-serif; max-width: 300px;">
-                            <h3 style="color: {polygon_color};">🗺️ Полигон: {polygon_name}</h3>
-                            <div style="background-color: #f5f5f5; padding: 10px; border-radius: 5px;">
-                                <p><b>👤 Аудитор:</b> {auditor_value}</p>
-                                <p><b>🏙️ Город:</b> {city_value}</p>
-                                <p><b>🔢 Количество точек:</b> {len(polygon_data.get('points', []))}</p>
-                                <p><b>🎨 Цвет:</b> <span style="color: {polygon_color}; font-size: 20px;">■</span> {polygon_color}</p>
-                                <p><i>Это центроид полигона. Сам полигон отображается как область.</i></p>
-                            </div>
-                        </div>
-                        """
-                        
-                        google_maps_data.append({
-                            'Название': f"🗺️ Полигон: {polygon_name}",
-                            'Описание': description_html,
-                            'Широта': centroid_lat,
-                            'Долгота': centroid_lon,
-                            'Тип_объекта': 'Полигон',
-                            'Категория': 'Полигон',
-                            'Аудитор': auditor_value,
-                            'Полигон': polygon_name,
-                            'Город': city_value,
-                            'Адрес': '',
-                            'ID_точки': polygon_name,
-                            'Цвет_полигона': polygon_color
-                        })
-                
-                # Создаем DataFrame
-                google_maps_df = pd.DataFrame(google_maps_data)
-                
-                # Создаем Excel файл
-                excel_buffer = io.BytesIO()
-                
-                with pd.ExcelWriter(excel_buffer, engine='openpyxl') as writer:
-                    # Лист для Google Карт
-                    simple_df = google_maps_df[['Название', 'Описание', 'Широта', 'Долгота']].copy()
-                    simple_df.columns = ['Name', 'Description', 'Latitude', 'Longitude']
-                    simple_df.to_excel(writer, sheet_name='Для_Google_Карт', index=False)
-                    
-                    # Лист со всеми данными
-                    google_maps_df.to_excel(writer, sheet_name='Все_данные', index=False)
-                    
-                    # Лист с цветами полигонов
-                    colors_data = []
-                    for poly_name, poly_data in polygons.items():
-                        colors_data.append({
-                            'Полигон': poly_name,
-                            'Аудитор': poly_data.get('auditor', 'Неизвестно'),
-                            'Цвет': color_map.get(poly_name, "#3366cc"),
-                            'Количество_точек': len(poly_data.get('points', [])),
-                            'Город': poly_data.get('city', 'Неизвестно')
-                        })
-                    
-                    colors_df = pd.DataFrame(colors_data)
-                    colors_df.to_excel(writer, sheet_name='Цвета_полигонов', index=False)
-                
-                excel_data = excel_buffer.getvalue()
-                b64 = base64.b64encode(excel_data).decode()
-                href = f'<a href="data:application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;base64,{b64}" download="google_maps_data.xlsx">📥 Скачать Excel для Google Карт</a>'
-                st.markdown(href, unsafe_allow_html=True)
-                st.success("✅ Файл готов к скачиванию!")
-                
-            except Exception as e:
-                st.error(f"❌ Ошибка при создании файла для Google Карт: {str(e)}")
-    
-    with col3:
-        st.markdown("### 🔄 Управление")
-        
-        if st.button("🔄 Обновить полигоны", type="secondary", use_container_width=True):
-            st.session_state.generate_polygons_flag = True
-            st.rerun()
-        
-        st.markdown("---")
-        st.markdown("### 🎨 Цветовая схема")
-        
-        # Показываем цвета полигонов
-        if polygons:
-            st.markdown("**Цвета полигонов:**")
-            for polygon_name in list(polygons.keys())[:5]:
-                color_info = polygon_colors.get(polygon_name, {'point_color': '#3366cc'})
-                st.markdown(f"""
-                <div style="display: flex; align-items: center; margin: 5px 0;">
-                    <div style="
-                        width: 20px; 
-                        height: 20px; 
-                        background-color: {color_info['point_color']}; 
-                        margin-right: 10px;
-                        border-radius: 3px;
-                    "></div>
-                    <span>{polygon_name}</span>
-                </div>
-                """, unsafe_allow_html=True)
-
+    else:
+        st.info("📊 Нет данных для отображения результатов. Нажмите 'Рассчитать план'.")
