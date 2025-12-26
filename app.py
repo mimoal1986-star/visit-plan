@@ -394,7 +394,7 @@ def get_weeks_in_quarter(year, quarter):
         current_date = week_end + timedelta(days=1)
     
     return weeks
-def distribute_visits_by_weeks_fixed(points_assignment_df, points_df, year, quarter, coefficients):
+def distribute_visits_by_weeks(points_assignment_df, points_df, year, quarter, coefficients):
     """Исправленная версия - минимальные изменения"""
     try:
         # ... существующий код до шага 4 ...
@@ -1677,6 +1677,7 @@ if st.session_state.plan_calculated:
             
         except Exception as e:
             st.error(f"❌ Ошибка при создании полного отчета: {str(e)}")
+
 
 
 
