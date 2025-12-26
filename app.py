@@ -1537,6 +1537,178 @@ if st.session_state.plan_calculated:
        # ВКЛАДКА 4: Карта полигонов
     with results_tabs[3]:
         st.subheader("🗺️ Карта полигонов аудиторов")
+                # БЛОК ВЫГРУЗКИ ДЛЯ GOOGLE КАРТ
+        st.markdown("### 📤 Выгрузка данных")
+        
+        col1, col2, col3 = st.columns(3)
+        
+        with col1:
+            if st.button("🗺️ KML для Google Earth", type="primary", use_container_width=True, key="export_kml"):
+                try:
+                    import simplekml
+                    
+                    # Создаем KML файл
+                    kml = simplekml.Kml()
+                    
+                    for poly_name, poly_info in polygons.items():
+                        # Основной полигон
+                        if 'coordinates' in poly_info and len(poly_info['coordinates']) > 2:
+                            pol = kml.newpolygon(name=f"Полигон: {poly_name}")
+                            pol.outerboundaryis = poly_info['coordinates']
+                            pol.style.polystyle.color = simplekml.Color.blue
+                            pol.style.linestyle.color = simplekml.Color.blue
+                            pol.style.linestyle.width = 3
+                            pol.description = f"Полигон: {poly_name}\nАудитор: {poly_info.get('auditor', 'Неизвестно')}"
+                        
+                        # Точки полигона
+                        folder = kml.newfolder(name=f"Точки: {poly_name}")
+                        for point in poly_info.get('points', []):
+                            if len(point) >= 3:
+                                pnt = folder.newpoint(name=f"Точка {point[0]}")
+                                pnt.coords = [(point[2], point[1])]  # (lon, lat)
+                                pnt.description = f"ID: {point[0]}"
+                    
+                    # Сохраняем во временный файл
+                    import tempfile
+                    import os
+                    
+                    with tempfile.NamedTemporaryFile(mode='wb', suffix='.kml', delete=False) as tmp_file:
+                        kml.save(tmp_file.name)
+                        tmp_file_path = tmp_file.name
+
+                    with open(tmp_file_path, "rb") as f:
+                        kml_data = f.read()
+
+                    # Очищаем временный файл
+                    try:
+                        os.unlink(tmp_file_path)
+                    except:
+                        pass
+                    
+                    # Предлагаем скачать
+                    import base64
+                    b64 = base64.b64encode(kml_data).decode()
+                    href = f'<a href="data:application/vnd.google-earth.kml+xml;base64,{b64}" download="полигоны_аудиторов.kml">📥 Скачать KML файл</a>'
+                    st.markdown(href, unsafe_allow_html=True)
+                    st.success("✅ Файл готов! Нажмите ссылку для скачивания.")
+                    
+                except Exception as e:
+                    st.error(f"❌ Ошибка: {str(e)}")
+        
+        with col2:
+            if st.button("📊 Excel для Google Карт", type="primary", use_container_width=True, key="export_excel"):
+                try:
+                    # Создаем DataFrame в формате для Google Карт
+                    google_maps_data = []
+                    
+                    # Добавляем полигоны
+                    for poly_name, poly_info in polygons.items():
+                        if 'coordinates' in poly_info and len(poly_info['coordinates']) > 0:
+                            # Вычисляем центроид полигона
+                            coords = poly_info['coordinates']
+                            lats = [c[0] for c in coords if len(c) >= 2]
+                            lons = [c[1] for c in coords if len(c) >= 2]
+                            
+                            if lats and lons:
+                                centroid_lat = sum(lats) / len(lats)
+                                centroid_lon = sum(lons) / len(lons)
+                                
+                                google_maps_data.append({
+                                    'Name': f"Полигон: {poly_name}",
+                                    'Description': f"Аудитор: {poly_info.get('auditor', 'Неизвестно')}\nГород: {poly_info.get('city', 'Неизвестно')}\nТочек: {len(poly_info.get('points', []))}",
+                                    'Latitude': centroid_lat,
+                                    'Longitude': centroid_lon,
+                                    'Type': 'Полигон',
+                                    'Color': 'Blue'
+                                })
+                    
+                    # Добавляем точки
+                    for poly_name, poly_info in polygons.items():
+                        for point in poly_info.get('points', []):
+                            if len(point) >= 3:
+                                point_id, lat, lon = point[0], point[1], point[2]
+                                
+                                # Находим информацию о точке
+                                point_name = f"Точка {point_id}"
+                                if st.session_state.points_df is not None:
+                                    point_info = st.session_state.points_df[st.session_state.points_df['ID_Точки'] == point_id]
+                                    if not point_info.empty:
+                                        point_name = point_info['Название_Точки'].iloc[0]
+                                
+                                google_maps_data.append({
+                                    'Name': point_name,
+                                    'Description': f"Полигон: {poly_name}\nАудитор: {poly_info.get('auditor', 'Неизвестно')}\nID: {point_id}",
+                                    'Latitude': lat,
+                                    'Longitude': lon,
+                                    'Type': 'Точка',
+                                    'Color': 'Red'
+                                })
+                    
+                    # Создаем DataFrame
+                    df_export = pd.DataFrame(google_maps_data)
+                    
+                    # Создаем Excel файл
+                    excel_buffer = io.BytesIO()
+                    with pd.ExcelWriter(excel_buffer, engine='openpyxl') as writer:
+                        df_export.to_excel(writer, sheet_name='Для_Google_Карт', index=False)
+                    
+                    excel_data = excel_buffer.getvalue()
+                    
+                    # Предлагаем скачать
+                    import base64
+                    b64 = base64.b64encode(excel_data).decode()
+                    href = f'<a href="data:application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;base64,{b64}" download="полигоны_для_google_карт.xlsx">📥 Скачать Excel файл</a>'
+                    st.markdown(href, unsafe_allow_html=True)
+                    st.success("✅ Файл готов! Импортируйте в Google Карты через 'Создать карту' → 'Импорт слоя'")
+                    
+                except Exception as e:
+                    st.error(f"❌ Ошибка: {str(e)}")
+        
+        with col3:
+            if st.button("📋 CSV простой формат", type="secondary", use_container_width=True, key="export_csv"):
+                try:
+                    # Простой CSV формат
+                    csv_data = []
+                    csv_data.append("Название,Описание,Широта,Долгота,Тип")
+                    
+                    # Полигоны (центроиды)
+                    for poly_name, poly_info in polygons.items():
+                        if 'coordinates' in poly_info and len(poly_info['coordinates']) > 0:
+                            coords = poly_info['coordinates']
+                            lats = [c[0] for c in coords if len(c) >= 2]
+                            lons = [c[1] for c in coords if len(c) >= 2]
+                            
+                            if lats and lons:
+                                centroid_lat = sum(lats) / len(lats)
+                                centroid_lon = sum(lons) / len(lons)
+                                
+                                csv_data.append(f'"Полигон: {poly_name}","Аудитор: {poly_info.get('auditor', 'Неизвестно')}",{centroid_lat},{centroid_lon},Полигон')
+                    
+                    # Точки
+                    for poly_name, poly_info in polygons.items():
+                        for point in poly_info.get('points', []):
+                            if len(point) >= 3:
+                                point_id, lat, lon = point[0], point[1], point[2]
+                                csv_data.append(f'"Точка {point_id}","Полигон: {poly_name}",{lat},{lon},Точка')
+                    
+                    # Объединяем в строку
+                    csv_string = "\n".join(csv_data)
+                    
+                    # Предлагаем скачать
+                    import base64
+                    b64 = base64.b64encode(csv_string.encode()).decode()
+                    href = f'<a href="data:text/csv;base64,{b64}" download="полигоны.csv">📥 Скачать CSV файл</a>'
+                    st.markdown(href, unsafe_allow_html=True)
+                    st.success("✅ CSV файл готов!")
+                    
+                except Exception as e:
+                    st.error(f"❌ Ошибка: {str(e)}")
+        
+        st.markdown("---")
+        
+        # ДАЛЕЕ ИДЕТ СУЩЕСТВУЮЩИЙ КОД С КАРТОЙ
+        if st.session_state.polygons is not None and len(st.session_state.polygons) > 0:
+            # ... ваш существующий код карты ...
         
         if st.session_state.polygons is not None and len(st.session_state.polygons) > 0:
             polygons = st.session_state.polygons
@@ -1745,3 +1917,4 @@ if st.session_state.plan_calculated:
                     st.info("Нет данных о точках для отображения на карте")
         else:
             st.info("Полигоны еще не сгенерированы. Нажмите кнопку 'Рассчитать план'")
+
