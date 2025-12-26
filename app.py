@@ -1521,7 +1521,7 @@ if st.session_state.plan_calculated:
                 total_polygons = len(st.session_state.polygons)
                 st.metric("Полигонов", total_polygons)
     
-    # ВКЛАДКА 5: Карта полигонов
+       # ВКЛАДКА 5: Карта полигонов
     with results_tabs[4]:
         st.subheader("🗺️ Карта полигонов аудиторов")
         
@@ -1546,20 +1546,18 @@ if st.session_state.plan_calculated:
                     '#e7298a', '#66a61e', '#e6ab02', '#a6761d', '#666666'
                 ]
                 
-                # Создаем цветовую схему: для каждого полигона свой цвет
-                # Полигон - светлый цвет, точки - темный оттенок того же цвета
+                # Создаем цветовую схему
                 polygon_colors = {}
                 
                 # Распределяем цвета по полигонам
                 polygon_names = list(polygons.keys())
                 for i, polygon_name in enumerate(polygon_names):
-                    # Берем базовый цвет
                     base_color = base_colors[i % len(base_colors)]
                     polygon_colors[polygon_name] = {
-                        'polygon_color': base_color,  # Более светлый для полигона
-                        'point_color': base_color,    # Тот же цвет для точек
-                        'polygon_opacity': 0.2,       # Прозрачность полигона
-                        'point_opacity': 0.8          # Непрозрачность точек
+                        'polygon_color': base_color,
+                        'point_color': base_color,
+                        'polygon_opacity': 0.2,
+                        'point_opacity': 0.8
                     }
                 
                 # Легенда
@@ -1639,9 +1637,9 @@ if st.session_state.plan_calculated:
                         </div>
                         """,
                         tooltip=f"📍 {polygon_name} ({polygon_data['auditor']})",
-                        color=point_color,  # Цвет границы
+                        color=point_color,
                         fill=True,
-                        fill_color=polygon_color,  # Цвет заливки
+                        fill_color=polygon_color,
                         fill_opacity=polygon_opacity,
                         weight=2
                     ).add_to(m)
@@ -1714,9 +1712,9 @@ if st.session_state.plan_calculated:
         else:
             st.info("Полигоны не сгенерированы. Нажмите кнопку 'Рассчитать план' для генерации полигонов.")
         
-    # Кнопка выгрузки в Excel для Google Карт
-    st.markdown("---")
-    st.subheader("📤 Выгрузка данных для Google Карт")
+        # Кнопки выгрузки (ДОБАВЛЯЕМ ВНУТРИ ВКЛАДКИ)
+        st.markdown("---")
+        st.subheader("📤 Выгрузка данных для Google Карт")
         
         col1, col2, col3 = st.columns(3)
         
@@ -1724,9 +1722,7 @@ if st.session_state.plan_calculated:
             st.markdown("### 🗺️ Выгрузка KML")
             if st.button("🗺️ Выгрузить KML файл", type="primary", use_container_width=True):
                 try:
-                    # Импортируем simplekml (должен быть импортирован в начале файла)
                     import simplekml
-                    
                     # Создаем KML файл
                     kml = simplekml.Kml()
                     
@@ -1845,12 +1841,11 @@ if st.session_state.plan_calculated:
                     if st.session_state.points_df is not None:
                         points_df = st.session_state.points_df.copy()
                         
-                        # Создаем колонки в формате Google Карт
                         for _, row in points_df.iterrows():
                             # Находим аудитора и полигон для этой точки
                             auditor_name = "Не назначен"
                             polygon_name = "Не назначен"
-                            polygon_color = "#3366cc"  # Цвет по умолчанию
+                            polygon_color = "#3366cc"
                             
                             for poly_name, poly_data in polygons.items():
                                 for point in poly_data['points']:
@@ -1891,14 +1886,13 @@ if st.session_state.plan_calculated:
                                 'Цвет_полигона': polygon_color
                             })
                     
-                    # Добавляем полигоны (центроиды для отображения)
+                    # Добавляем полигоны (центроиды)
                     for polygon_name, polygon_data in polygons.items():
                         polygon_color = color_map.get(polygon_name, "#3366cc")
                         
                         # Вычисляем центроид полигона
                         coords = polygon_data['coordinates']
                         if coords and len(coords) > 0:
-                            # Исключаем последнюю точку (она дублирует первую)
                             valid_coords = coords[:-1] if len(coords) > 1 else coords
                             lats = [c[0] for c in valid_coords]
                             lons = [c[1] for c in valid_coords]
@@ -1938,21 +1932,17 @@ if st.session_state.plan_calculated:
                     # Создаем DataFrame
                     google_maps_df = pd.DataFrame(google_maps_data)
                     
-                    # Создаем Excel файл с несколькими листами
+                    # Создаем Excel файл
                     excel_buffer = io.BytesIO()
                     
                     with pd.ExcelWriter(excel_buffer, engine='openpyxl') as writer:
-                        # Лист для Google Карт (упрощенный формат)
+                        # Лист для Google Карт
                         simple_df = google_maps_df[['Название', 'Описание', 'Широта', 'Долгота']].copy()
                         simple_df.columns = ['Name', 'Description', 'Latitude', 'Longitude']
-                        simple_df.to_excel(
-                            writer, sheet_name='Для_Google_Карт', index=False
-                        )
+                        simple_df.to_excel(writer, sheet_name='Для_Google_Карт', index=False)
                         
                         # Лист со всеми данными
-                        google_maps_df.to_excel(
-                            writer, sheet_name='Все_данные', index=False
-                        )
+                        google_maps_df.to_excel(writer, sheet_name='Все_данные', index=False)
                         
                         # Лист с цветами полигонов
                         colors_df = pd.DataFrame([
@@ -1966,54 +1956,13 @@ if st.session_state.plan_calculated:
                             for poly_name, poly_data in polygons.items()
                         ])
                         colors_df.to_excel(writer, sheet_name='Цвета_полигонов', index=False)
-                        
-                        # Лист с инструкцией
-                        instructions_df = pd.DataFrame([{
-                            'Шаг': 1,
-                            'Описание': 'Скачайте файл "google_maps_data.xlsx"',
-                            'Действие': 'Нажмите кнопку "📥 Скачать Excel" ниже'
-                        }, {
-                            'Шаг': 2,
-                            'Описание': 'Откройте Google Карты',
-                            'Действие': 'Перейдите на https://maps.google.com'
-                        }, {
-                            'Шаг': 3,
-                            'Описание': 'Создайте новую карту',
-                            'Действие': 'Нажмите "Создать карту" → "Создать"'
-                        }, {
-                            'Шаг': 4,
-                            'Описание': 'Импортируйте данные',
-                            'Действие': 'Нажмите "Импорт" и выберите скачанный файл'
-                        }, {
-                            'Шаг': 5,
-                            'Описание': 'Настройте отображение',
-                            'Действие': 'Выберите лист "Для_Google_Карт", колонки: Latitude → Широта, Longitude → Долгота, Name → Название'
-                        }, {
-                            'Шаг': 6,
-                            'Описание': 'Сохраните карту',
-                            'Действие': 'Дайте название карте и нажмите "Сохранить"'
-                        }, {
-                            'Шаг': 7,
-                            'Описание': 'Настройте стили',
-                            'Действие': 'В настройках слоя выберите "Отдельные стили" и настройте цвета по столбцу "Полигон"'
-                        }])
-                        
-                        instructions_df.to_excel(
-                            writer, sheet_name='Инструкция', index=False
-                        )
                     
                     excel_data = excel_buffer.getvalue()
                     b64 = base64.b64encode(excel_data).decode()
                     href = f'<a href="data:application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;base64,{b64}" download="google_maps_data.xlsx">📥 Скачать Excel для Google Карт</a>'
                     st.markdown(href, unsafe_allow_html=True)
-                    
-                    # Показываем предпросмотр данных
                     st.success("✅ Файл готов к скачиванию!")
                     
-                    with st.expander("👁️ Предпросмотр данных для Google Карт", expanded=False):
-                        st.dataframe(google_maps_df[['Название', 'Широта', 'Долгота', 'Аудитор', 'Полигон', 'Цвет_полигона']].head(10), 
-                                   use_container_width=True)
-                        
                 except Exception as e:
                     st.error(f"❌ Ошибка при создании файла для Google Карт: {str(e)}")
         
@@ -2030,7 +1979,7 @@ if st.session_state.plan_calculated:
             # Показываем цвета полигонов
             if polygons:
                 st.markdown("**Цвета полигонов:**")
-                for polygon_name in list(polygons.keys())[:5]:  # Показываем первые 5
+                for polygon_name in list(polygons.keys())[:5]:
                     color_info = polygon_colors.get(polygon_name, {'point_color': '#3366cc'})
                     st.markdown(f"""
                     <div style="display: flex; align-items: center; margin: 5px 0;">
@@ -2044,21 +1993,3 @@ if st.session_state.plan_calculated:
                         <span>{polygon_name}</span>
                     </div>
                     """, unsafe_allow_html=True)
-            
-            st.markdown("---")
-            st.markdown("### 📋 Инструкция")
-            st.info("""
-            **Цветовая схема:**
-            - Каждый полигон имеет уникальный цвет
-            - Точки внутри полигона того же цвета
-            - Полигоны прозрачные (20%), точки непрозрачные (80%)
-            
-            **Для Google Карт:**
-            1. Скачайте Excel файл
-            2. Откройте Google Карты → Создать карту
-            3. Импортируйте файл
-            4. Выберите лист "Для_Google_Карт"
-            5. Настройте: Широта → Latitude, Долгота → Longitude
-            """)
-
-
