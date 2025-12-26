@@ -598,7 +598,10 @@ def distribute_visits_by_weeks_fixed(points_assignment_df, points_df, year, quar
         return result_df
         
     except Exception as e:
-        # ... обработка ошибок ...
+        import traceback
+        st.error(f"❌ Ошибка при распределении посещений по неделям: {str(e)}")
+        st.error(f"Детали:\n{traceback.format_exc()}")
+        return pd.DataFrame()
         
 def distribute_points_to_auditors(points_df, auditors_df):
     """
@@ -1673,6 +1676,7 @@ if st.session_state.plan_calculated:
             
         except Exception as e:
             st.error(f"❌ Ошибка при создании полного отчета: {str(e)}")
+
 
 
 
