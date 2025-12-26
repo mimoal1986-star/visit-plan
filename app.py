@@ -1681,8 +1681,9 @@ if st.session_state.plan_calculated:
                             if lats and lons:
                                 centroid_lat = sum(lats) / len(lats)
                                 centroid_lon = sum(lons) / len(lons)
-                                
-                                csv_data.append(f'"Полигон: {poly_name}","Аудитор: {poly_info.get('auditor', 'Неизвестно')}",{centroid_lat},{centroid_lon},Полигон')
+
+                                auditor = poly_info.get('auditor', 'Неизвестно')
+                               csv_data.append(f'"Полигон: {poly_name}","Аудитор: {auditor}",{centroid_lat},{centroid_lon},Полигон')
                     
                     # Точки
                     for poly_name, poly_info in polygons.items():
@@ -1917,4 +1918,5 @@ if st.session_state.plan_calculated:
                     st.info("Нет данных о точках для отображения на карте")
         else:
             st.info("Полигоны еще не сгенерированы. Нажмите кнопку 'Рассчитать план'")
+
 
