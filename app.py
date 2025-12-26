@@ -1522,202 +1522,542 @@ if st.session_state.plan_calculated:
                 st.metric("Полигонов", total_polygons)
     
     # ВКЛАДКА 5: Карта полигонов
-    with results_tabs[3]:
+    with results_tabs[4]:
         st.subheader("🗺️ Карта полигонов аудиторов")
         
         if st.session_state.polygons is not None and len(st.session_state.polygons) > 0:
             polygons = st.session_state.polygons
             
-            # Проверяем, установлен ли folium
-            try:
-                import folium
-                from streamlit_folium import folium_static
-                FOLIUM_AVAILABLE = True
-            except ImportError:
-                FOLIUM_AVAILABLE = False
-            
-            if not FOLIUM_AVAILABLE:
-                st.error("""
-                ## ⚠️ Библиотека картографии не установлена
+            # Создаем карту
+            if st.session_state.points_df is not None:
+                points_df = st.session_state.points_df
                 
-                Для отображения интерактивной карты установите:
-                ```bash
-                pip install folium streamlit-folium
-                ```
+                # Находим центр карты
+                center_lat = points_df['Широта'].mean()
+                center_lon = points_df['Долгота'].mean()
                 
-                **А пока показываем информацию в таблице:**
-                """)
+                m = folium.Map(location=[center_lat, center_lon], zoom_start=10)
                 
-                # Таблица с полигонами
-                poly_data = []
-                for poly_name, poly_info in polygons.items():
-                    poly_data.append({
-                        'Полигон': poly_name,
-                        'Аудитор': poly_info.get('auditor', 'Неизвестно'),
-                        'Количество точек': len(poly_info.get('points', [])),
-                        'Город': poly_info.get('city', 'Неизвестно')
-                    })
+                # Цвета для полигонов (из палитры Set3)
+                base_colors = [
+                    '#8dd3c7', '#ffffb3', '#bebada', '#fb8072', '#80b1d3',
+                    '#fdb462', '#b3de69', '#fccde5', '#d9d9d9', '#bc80bd',
+                    '#ccebc5', '#ffed6f', '#1b9e77', '#d95f02', '#7570b3',
+                    '#e7298a', '#66a61e', '#e6ab02', '#a6761d', '#666666'
+                ]
                 
-                if poly_data:
-                    poly_df = pd.DataFrame(poly_data)
-                    st.dataframe(poly_df, use_container_width=True)
+                # Создаем цветовую схему: для каждого полигона свой цвет
+                # Полигон - светлый цвет, точки - темный оттенок того же цвета
+                polygon_colors = {}
+                
+                # Распределяем цвета по полигонам
+                polygon_names = list(polygons.keys())
+                for i, polygon_name in enumerate(polygon_names):
+                    # Берем базовый цвет
+                    base_color = base_colors[i % len(base_colors)]
+                    polygon_colors[polygon_name] = {
+                        'polygon_color': base_color,  # Более светлый для полигона
+                        'point_color': base_color,    # Тот же цвет для точек
+                        'polygon_opacity': 0.2,       # Прозрачность полигона
+                        'point_opacity': 0.8          # Непрозрачность точек
+                    }
+                
+                # Легенда
+                from branca.element import Template, MacroElement
+                
+                template = """
+                {% macro html(this, kwargs) %}
+                <div style="
+                    position: fixed; 
+                    bottom: 50px;
+                    left: 50px;
+                    width: 300px;
+                    height: auto;
+                    background-color: white;
+                    border: 2px solid grey;
+                    z-index: 9999;
+                    font-size: 14px;
+                    padding: 10px;
+                    border-radius: 5px;
+                    box-shadow: 0 0 10px rgba(0,0,0,0.2);
+                    overflow-y: auto;
+                    max-height: 400px;
+                    ">
+                    <p style="font-weight: bold; margin-bottom: 10px; font-size: 16px;">🗺️ Легенда полигонов</p>
+                """
+                
+                # Счетчики для статистики
+                total_points = 0
+                
+                # Добавляем полигоны и точки
+                for i, (polygon_name, polygon_data) in enumerate(polygons.items()):
+                    color_info = polygon_colors[polygon_name]
+                    polygon_color = color_info['polygon_color']
+                    point_color = color_info['point_color']
+                    polygon_opacity = color_info['polygon_opacity']
+                    point_opacity = color_info['point_opacity']
                     
-                    # Выгрузка информации о полигонах в Excel
-                    try:
-                        excel_buffer = io.BytesIO()
-                        with pd.ExcelWriter(excel_buffer, engine='openpyxl') as writer:
-                            poly_df.to_excel(writer, sheet_name='Полигоны', index=False)
+                    # Считаем точки в полигоне
+                    points_in_polygon = len(polygon_data['points'])
+                    total_points += points_in_polygon
+                    
+                    # Добавляем в легенду
+                    template += f"""
+                    <div style="margin: 5px 0; padding: 5px; border-bottom: 1px solid #eee;">
+                        <div style="display: flex; align-items: center;">
+                            <div style="
+                                width: 20px; 
+                                height: 20px; 
+                                background-color: {polygon_color}; 
+                                border: 2px solid {point_color};
+                                border-radius: 3px;
+                                margin-right: 10px;
+                                opacity: {polygon_opacity};
+                            "></div>
+                            <div>
+                                <div style="font-weight: bold;">{polygon_name}</div>
+                                <div style="font-size: 12px; color: #666;">
+                                    👤 {polygon_data['auditor']} | 📍 {points_in_polygon} точек
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    """
+                    
+                    # Полигон
+                    folium.Polygon(
+                        locations=polygon_data['coordinates'],
+                        popup=f"""
+                        <div style="font-family: Arial, sans-serif; max-width: 300px;">
+                            <h4 style="color: {point_color}; margin-bottom: 10px;">📍 {polygon_name}</h4>
+                            <div style="background-color: #f5f5f5; padding: 10px; border-radius: 5px;">
+                                <p><b>👤 Аудитор:</b> {polygon_data['auditor']}</p>
+                                <p><b>🏙️ Город:</b> {polygon_data['city']}</p>
+                                <p><b>🔢 Количество точек:</b> {points_in_polygon}</p>
+                                <p><b>🎨 Цвет:</b> <span style="color: {point_color};">■</span></p>
+                            </div>
+                        </div>
+                        """,
+                        tooltip=f"📍 {polygon_name} ({polygon_data['auditor']})",
+                        color=point_color,  # Цвет границы
+                        fill=True,
+                        fill_color=polygon_color,  # Цвет заливки
+                        fill_opacity=polygon_opacity,
+                        weight=2
+                    ).add_to(m)
+                    
+                    # Точки
+                    for point in polygon_data['points']:
+                        point_id, lat, lon = point
                         
-                        excel_data = excel_buffer.getvalue()
-                        b64 = base64.b64encode(excel_data).decode()
-                        href = f'<a href="data:application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;base64,{b64}" download="информация_о_полигонах.xlsx">📥 Скачать информацию о полигонах</a>'
-                        st.markdown(href, unsafe_allow_html=True)
-                    except Exception as e:
-                        st.error(f"❌ Ошибка при создании Excel файла: {str(e)}")
-                    
-                    st.markdown("---")
-                    st.info("""
-                    **После установки folium и streamlit-folium:**
-                    1. Закройте приложение
-                    2. Установите: `pip install folium streamlit-folium`
-                    3. Перезапустите приложение
-                    4. Карта появится автоматически
-                    """)
-            else:
-                # Код для карты с folium (упрощенная версия)
-                if st.session_state.points_df is not None:
-                    points_df = st.session_state.points_df
-                    
-                    # Находим центр карты
-                    center_lat = points_df['Широта'].mean()
-                    center_lon = points_df['Долгота'].mean()
-                    
-                    m = folium.Map(location=[center_lat, center_lon], zoom_start=10)
-                    
-                    # Простой код для отображения точек
-                    colors = ['red', 'blue', 'green', 'purple', 'orange', 'darkred']
-                    
-                    # Группируем точки по аудиторам для разных цветов
-                    if st.session_state.details_df is not None:
-                        details_df = st.session_state.details_df
-                        auditor_colors = {}
-                        auditors = details_df['Аудитор'].unique() if 'Аудитор' in details_df.columns else []
-                        
-                        for i, auditor in enumerate(auditors):
-                            auditor_colors[auditor] = colors[i % len(colors)]
-                    
-                    for _, point in points_df.iterrows():
-                        # Определяем цвет по аудитору
-                        color = 'blue'  # цвет по умолчанию
+                        # Находим информацию о точке
+                        point_info = points_df[points_df['ID_Точки'] == point_id]
+                        if not point_info.empty:
+                            point_name = point_info['Название_Точки'].iloc[0]
+                            point_address = point_info['Адрес'].iloc[0] if pd.notna(point_info['Адрес'].iloc[0]) and point_info['Адрес'].iloc[0] != '' else "Адрес не указан"
+                            point_type = point_info['Тип'].iloc[0]
+                        else:
+                            point_name = point_id
+                            point_address = "Информация не найдена"
+                            point_type = "Неизвестно"
                         
                         folium.CircleMarker(
-                            location=[point['Широта'], point['Долгота']],
-                            radius=5,
+                            location=[lat, lon],
+                            radius=6,
                             popup=f"""
-                            <div style="font-family: Arial, sans-serif;">
-                                <h4>🏪 {point['Название_Точки']}</h4>
-                                <p><b>🆔 ID:</b> {point['ID_Точки']}</p>
-                                <p><b>📍 Адрес:</b> {point.get('Адрес', 'Не указан')}</p>
-                                <p><b>🏷️ Тип:</b> {point['Тип']}</p>
-                                <p><b>🏙️ Город:</b> {point['Город']}</p>
+                            <div style="font-family: Arial, sans-serif; max-width: 300px;">
+                                <h4 style="color: {point_color}; margin-bottom: 10px;">🏪 {point_name}</h4>
+                                <div style="background-color: #f5f5f5; padding: 10px; border-radius: 5px;">
+                                    <p><b>🆔 ID:</b> {point_id}</p>
+                                    <p><b>📍 Адрес:</b> {point_address}</p>
+                                    <p><b>🏷️ Тип:</b> {point_type}</p>
+                                    <p><b>👤 Аудитор:</b> {polygon_data['auditor']}</p>
+                                    <p><b>📍 Полигон:</b> {polygon_name}</p>
+                                    <p><b>🎨 Цвет:</b> <span style="color: {point_color};">●</span></p>
+                                </div>
                             </div>
                             """,
-                            tooltip=f"🏪 {point['Название_Точки']}",
-                            color=color,
+                            tooltip=f"🏪 {point_name} ({polygon_data['auditor']})",
+                            color=point_color,
                             fill=True,
-                            fill_opacity=0.8
+                            fill_opacity=point_opacity,
+                            weight=2
                         ).add_to(m)
-                    
-                    folium_static(m, width=1200, height=600)
-                    
-                    st.success("✅ Карта загружена с использованием Folium")
-                    
-                    # Выгрузка информации о точках в Excel
-                    try:
-                        excel_buffer = io.BytesIO()
-                        with pd.ExcelWriter(excel_buffer, engine='openpyxl') as writer:
-                            points_df.to_excel(writer, sheet_name='Точки_на_карте', index=False)
-                        
-                        excel_data = excel_buffer.getvalue()
-                        b64 = base64.b64encode(excel_data).decode()
-                        href = f'<a href="data:application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;base64,{b64}" download="точки_на_карте.xlsx">📥 Скачать точки с карты</a>'
-                        st.markdown(href, unsafe_allow_html=True)
-                    except Exception as e:
-                        st.error(f"❌ Ошибка при создании Excel файла: {str(e)}")
+                
+                # Добавляем статистику в легенду
+                template += f"""
+                <div style="margin-top: 10px; padding-top: 10px; border-top: 2px solid #ddd;">
+                    <div style="font-size: 12px; color: #666;">
+                        <p><b>📊 Статистика:</b></p>
+                        <p>• 🗺️ Полигонов: {len(polygons)}</p>
+                        <p>• 📍 Всего точек: {total_points}</p>
+                        <p>• 🎨 Уникальных цветов: {len(set(polygon_colors.keys()))}</p>
+                    </div>
+                </div>
+                """
+                
+                # Завершаем легенду
+                template += """
+                </div>
+                {% endmacro %}
+                """
+                
+                macro = MacroElement()
+                macro._template = Template(template)
+                m.get_root().add_child(macro)
+                
+                # Отображаем карту
+                folium_static(m, width=900, height=600)
+            
+            else:
+                st.info("Нет данных о точках для отображения на карте")
         else:
-            st.info("Полигоны еще не сгенерированы. Нажмите кнопку 'Рассчитать план'")
-    st.markdown("---")
-    st.subheader("💾 Скачать ВСЕ отчеты одним файлом")
-    
-    if st.button("📦 Скачать ПОЛНЫЙ ОТЧЕТ (все данные в одном Excel)", use_container_width=True, type="primary"):
-        try:
-            excel_buffer = io.BytesIO()
-            with pd.ExcelWriter(excel_buffer, engine='openpyxl') as writer:
-                # Добавляем все доступные данные
-                if st.session_state.city_stats_df is not None and not st.session_state.city_stats_df.empty:
-                    st.session_state.city_stats_df.to_excel(writer, sheet_name='01_Статистика_городов', index=False)
-                
-                if st.session_state.type_stats_df is not None and not st.session_state.type_stats_df.empty:
-                    st.session_state.type_stats_df.to_excel(writer, sheet_name='02_Статистика_типов', index=False)
-                
-                if st.session_state.summary_df is not None and not st.session_state.summary_df.empty:
-                    st.session_state.summary_df.to_excel(writer, sheet_name='03_Сводный_план', index=False)
-                
-                if st.session_state.details_df is not None and not st.session_state.details_df.empty:
-                    st.session_state.details_df.to_excel(writer, sheet_name='04_Детализация', index=False)
-                
-                if st.session_state.points_df is not None and not st.session_state.points_df.empty:
-                    st.session_state.points_df.to_excel(writer, sheet_name='05_Точки', index=False)
-                
-                if st.session_state.auditors_df is not None and not st.session_state.auditors_df.empty:
-                    st.session_state.auditors_df.to_excel(writer, sheet_name='06_Аудиторы', index=False)
-                
-                # Добавляем информацию о полигонах если есть
-                if st.session_state.polygons is not None:
-                    poly_data = []
-                    for poly_name, poly_info in st.session_state.polygons.items():
-                        poly_data.append({
-                            'Полигон': poly_name,
-                            'Аудитор': poly_info.get('auditor', 'Неизвестно'),
-                            'Точек': len(poly_info.get('points', [])),
-                            'Город': poly_info.get('city', 'Неизвестно')
-                        })
-                    if poly_data:
-                        pd.DataFrame(poly_data).to_excel(writer, sheet_name='07_Полигоны', index=False)
+            st.info("Полигоны не сгенерированы. Нажмите кнопку 'Рассчитать план' для генерации полигонов.")
+        
+        # Кнопка выгрузки в Excel для Google Карт
+        st.markdown("---")
+        st.subheader("📤 Выгрузка данных для Google Карт")
+        
+        col1, col2, col3 = st.columns(3)
+        
+        with col1:
+            st.markdown("### 🗺️ Выгрузка KML")
+            if st.button("🗺️ Выгрузить KML файл", type="primary", use_container_width=True):
+                try:
+                    # Импортируем simplekml (должен быть импортирован в начале файла)
+                    import simplekml
+                    
+                    # Создаем KML файл
+                    kml = simplekml.Kml()
+                    
+                    for polygon_name, polygon_data in polygons.items():
+                        color_info = polygon_colors.get(polygon_name, {'point_color': '#3366cc'})
+                        point_color = color_info['point_color']
+                        
+                        # Конвертируем цвет для KML
+                        if point_color.startswith('#'):
+                            color_hex = point_color.lstrip('#')
+                            if len(color_hex) == 6:
+                                r = int(color_hex[0:2], 16)
+                                g = int(color_hex[2:4], 16)
+                                b = int(color_hex[4:6], 16)
+                                kml_color = simplekml.Color.rgb(b, g, r, alpha=200)
+                            else:
+                                kml_color = simplekml.Color.blue
+                        else:
+                            kml_color = simplekml.Color.blue
+                        
+                        # Полигон
+                        pol = kml.newpolygon(name=f"Полигон: {polygon_name}")
+                        pol.outerboundaryis = polygon_data['coordinates']
+                        pol.style.polystyle.color = kml_color
+                        pol.style.linestyle.color = kml_color
+                        pol.style.linestyle.width = 3
+                        
+                        pol.description = f"""
+                        <![CDATA[
+                        <h3 style="color: {point_color};">🗺️ Полигон: {polygon_name}</h3>
+                        <div style="background-color: #f5f5f5; padding: 10px; border-radius: 5px;">
+                            <p><b>👤 Аудитор:</b> {polygon_data['auditor']}</p>
+                            <p><b>🏙️ Город:</b> {polygon_data['city']}</p>
+                            <p><b>🔢 Количество точек:</b> {len(polygon_data['points'])}</p>
+                            <p><b>🎨 Цвет:</b> <span style="color: {point_color}; font-size: 20px;">■</span></p>
+                        </div>
+                        ]]>
+                        """
+                        
+                        # Папка с точками полигона
+                        folder = kml.newfolder(name=f"📍 Точки полигона: {polygon_name}")
+                        
+                        for point in polygon_data['points']:
+                            point_id, lat, lon = point
+                            
+                            # Находим информацию о точке
+                            point_info = st.session_state.points_df[st.session_state.points_df['ID_Точки'] == point_id]
+                            if not point_info.empty:
+                                point_name = point_info['Название_Точки'].iloc[0]
+                                point_address = point_info['Адрес'].iloc[0] if pd.notna(point_info['Адрес'].iloc[0]) and point_info['Адрес'].iloc[0] != '' else "Адрес не указан"
+                                point_type = point_info['Тип'].iloc[0]
+                            else:
+                                point_name = point_id
+                                point_address = "Информация не найдена"
+                                point_type = "Неизвестно"
+                            
+                            pnt = folder.newpoint(name=f"🏪 {point_name}")
+                            pnt.coords = [(lon, lat)]
+                            pnt.style.iconstyle.color = kml_color
+                            pnt.style.iconstyle.scale = 1.2
+                            pnt.style.labelstyle.scale = 0.8
+                            
+                            pnt.description = f"""
+                            <![CDATA[
+                            <h4 style="color: {point_color};">🏪 {point_name}</h4>
+                            <div style="background-color: #f5f5f5; padding: 10px; border-radius: 5px;">
+                                <p><b>🆔 ID:</b> {point_id}</p>
+                                <p><b>📍 Адрес:</b> {point_address}</p>
+                                <p><b>🏷️ Тип:</b> {point_type}</p>
+                                <p><b>👤 Аудитор:</b> {polygon_data['auditor']}</p>
+                                <p><b>📍 Полигон:</b> {polygon_name}</p>
+                                <p><b>🎨 Цвет:</b> <span style="color: {point_color}; font-size: 20px;">●</span></p>
+                            </div>
+                            ]]>
+                            """
+                    
+                    # Сохраняем KML
+                    import tempfile
+                    import os
+                    
+                    with tempfile.NamedTemporaryFile(mode='wb', suffix='.kml', delete=False) as tmp_file:
+                        kml.save(tmp_file.name)
+                        tmp_file_path = tmp_file.name
+
+                    with open(tmp_file_path, "rb") as f:
+                        kml_data = f.read()
+
+                    try:
+                        os.unlink(tmp_file_path)
+                    except:
+                        pass
+                    
+                    b64 = base64.b64encode(kml_data).decode()
+                    href = f'<a href="data:application/vnd.google-earth.kml+xml;base64,{b64}" download="полигоны_аудиторов.kml">📥 Скачать KML файл</a>'
+                    st.markdown(href, unsafe_allow_html=True)
+                    st.success("✅ KML файл успешно сгенерирован!")
+                    
+                except Exception as e:
+                    st.error(f"❌ Ошибка при генерации KML: {str(e)}")
+        
+        with col2:
+            st.markdown("### 📊 Выгрузка в Excel для Google Карт")
             
-            excel_data = excel_buffer.getvalue()
-            st.download_button(
-                label="⬇️ Нажмите чтобы скачать",
-                data=excel_data,
-                file_name=f"ПОЛНЫЙ_ОТЧЕТ_{year}_Q{quarter}.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                use_container_width=True
-            )
+            if st.button("📊 Выгрузить для Google Карт", type="primary", use_container_width=True):
+                try:
+                    # Создаем цветовую карту для экспорта
+                    color_map = {}
+                    for polygon_name in polygons.keys():
+                        color_info = polygon_colors.get(polygon_name, {'point_color': '#3366cc'})
+                        color_map[polygon_name] = color_info['point_color']
+                    
+                    # Создаем DataFrame для Google Карт
+                    google_maps_data = []
+                    
+                    # Добавляем точки
+                    if st.session_state.points_df is not None:
+                        points_df = st.session_state.points_df.copy()
+                        
+                        # Создаем колонки в формате Google Карт
+                        for _, row in points_df.iterrows():
+                            # Находим аудитора и полигон для этой точки
+                            auditor_name = "Не назначен"
+                            polygon_name = "Не назначен"
+                            polygon_color = "#3366cc"  # Цвет по умолчанию
+                            
+                            for poly_name, poly_data in polygons.items():
+                                for point in poly_data['points']:
+                                    if point[0] == row['ID_Точки']:
+                                        auditor_name = poly_data['auditor']
+                                        polygon_name = poly_name
+                                        polygon_color = color_map.get(poly_name, "#3366cc")
+                                        break
+                            
+                            # Создаем HTML описание
+                            description_html = f"""
+                            <div style="font-family: Arial, sans-serif; max-width: 300px;">
+                                <h3 style="color: {polygon_color};">🏪 {row['Название_Точки']}</h3>
+                                <div style="background-color: #f5f5f5; padding: 10px; border-radius: 5px;">
+                                    <p><b>🆔 ID:</b> {row['ID_Точки']}</p>
+                                    <p><b>🏷️ Тип:</b> {row['Тип']}</p>
+                                    <p><b>🏙️ Город:</b> {row['Город']}</p>
+                                    <p><b>👤 Аудитор:</b> {auditor_name}</p>
+                                    <p><b>📍 Полигон:</b> {polygon_name}</p>
+                                    <p><b>📍 Адрес:</b> {row['Адрес'] if pd.notna(row['Адрес']) else 'Не указан'}</p>
+                                    <p><b>🎨 Цвет полигона:</b> <span style="color: {polygon_color}; font-size: 20px;">●</span> {polygon_color}</p>
+                                </div>
+                            </div>
+                            """
+                            
+                            google_maps_data.append({
+                                'Название': f"🏪 {row['Название_Точки']}",
+                                'Описание': description_html,
+                                'Широта': row['Широта'],
+                                'Долгота': row['Долгота'],
+                                'Тип_объекта': 'Точка',
+                                'Категория': row['Тип'],
+                                'Аудитор': auditor_name,
+                                'Полигон': polygon_name,
+                                'Город': row['Город'],
+                                'Адрес': row['Адрес'] if pd.notna(row['Адрес']) else '',
+                                'ID_точки': row['ID_Точки'],
+                                'Цвет_полигона': polygon_color
+                            })
+                    
+                    # Добавляем полигоны (центроиды для отображения)
+                    for polygon_name, polygon_data in polygons.items():
+                        polygon_color = color_map.get(polygon_name, "#3366cc")
+                        
+                        # Вычисляем центроид полигона
+                        coords = polygon_data['coordinates']
+                        if coords and len(coords) > 0:
+                            # Исключаем последнюю точку (она дублирует первую)
+                            valid_coords = coords[:-1] if len(coords) > 1 else coords
+                            lats = [c[0] for c in valid_coords]
+                            lons = [c[1] for c in valid_coords]
+                            
+                            centroid_lat = sum(lats) / len(lats)
+                            centroid_lon = sum(lons) / len(lons)
+                            
+                            # Создаем HTML описание для полигона
+                            description_html = f"""
+                            <div style="font-family: Arial, sans-serif; max-width: 300px;">
+                                <h3 style="color: {polygon_color};">🗺️ Полигон: {polygon_name}</h3>
+                                <div style="background-color: #f5f5f5; padding: 10px; border-radius: 5px;">
+                                    <p><b>👤 Аудитор:</b> {polygon_data['auditor']}</p>
+                                    <p><b>🏙️ Город:</b> {polygon_data['city']}</p>
+                                    <p><b>🔢 Количество точек:</b> {len(polygon_data['points'])}</p>
+                                    <p><b>🎨 Цвет:</b> <span style="color: {polygon_color}; font-size: 20px;">■</span> {polygon_color}</p>
+                                    <p><i>Это центроид полигона. Сам полигон отображается как область.</i></p>
+                                </div>
+                            </div>
+                            """
+                            
+                            google_maps_data.append({
+                                'Название': f"🗺️ Полигон: {polygon_name}",
+                                'Описание': description_html,
+                                'Широта': centroid_lat,
+                                'Долгота': centroid_lon,
+                                'Тип_объекта': 'Полигон',
+                                'Категория': 'Полигон',
+                                'Аудитор': polygon_data['auditor'],
+                                'Полигон': polygon_name,
+                                'Город': polygon_data['city'],
+                                'Адрес': '',
+                                'ID_точки': polygon_name,
+                                'Цвет_полигона': polygon_color
+                            })
+                    
+                    # Создаем DataFrame
+                    google_maps_df = pd.DataFrame(google_maps_data)
+                    
+                    # Создаем Excel файл с несколькими листами
+                    excel_buffer = io.BytesIO()
+                    
+                    with pd.ExcelWriter(excel_buffer, engine='openpyxl') as writer:
+                        # Лист для Google Карт (упрощенный формат)
+                        simple_df = google_maps_df[['Название', 'Описание', 'Широта', 'Долгота']].copy()
+                        simple_df.columns = ['Name', 'Description', 'Latitude', 'Longitude']
+                        simple_df.to_excel(
+                            writer, sheet_name='Для_Google_Карт', index=False
+                        )
+                        
+                        # Лист со всеми данными
+                        google_maps_df.to_excel(
+                            writer, sheet_name='Все_данные', index=False
+                        )
+                        
+                        # Лист с цветами полигонов
+                        colors_df = pd.DataFrame([
+                            {
+                                'Полигон': poly_name,
+                                'Аудитор': poly_data['auditor'],
+                                'Цвет': color_map.get(poly_name, "#3366cc"),
+                                'Количество_точек': len(poly_data['points']),
+                                'Город': poly_data['city']
+                            }
+                            for poly_name, poly_data in polygons.items()
+                        ])
+                        colors_df.to_excel(writer, sheet_name='Цвета_полигонов', index=False)
+                        
+                        # Лист с инструкцией
+                        instructions_df = pd.DataFrame([{
+                            'Шаг': 1,
+                            'Описание': 'Скачайте файл "google_maps_data.xlsx"',
+                            'Действие': 'Нажмите кнопку "📥 Скачать Excel" ниже'
+                        }, {
+                            'Шаг': 2,
+                            'Описание': 'Откройте Google Карты',
+                            'Действие': 'Перейдите на https://maps.google.com'
+                        }, {
+                            'Шаг': 3,
+                            'Описание': 'Создайте новую карту',
+                            'Действие': 'Нажмите "Создать карту" → "Создать"'
+                        }, {
+                            'Шаг': 4,
+                            'Описание': 'Импортируйте данные',
+                            'Действие': 'Нажмите "Импорт" и выберите скачанный файл'
+                        }, {
+                            'Шаг': 5,
+                            'Описание': 'Настройте отображение',
+                            'Действие': 'Выберите лист "Для_Google_Карт", колонки: Latitude → Широта, Longitude → Долгота, Name → Название'
+                        }, {
+                            'Шаг': 6,
+                            'Описание': 'Сохраните карту',
+                            'Действие': 'Дайте название карте и нажмите "Сохранить"'
+                        }, {
+                            'Шаг': 7,
+                            'Описание': 'Настройте стили',
+                            'Действие': 'В настройках слоя выберите "Отдельные стили" и настройте цвета по столбцу "Полигон"'
+                        }])
+                        
+                        instructions_df.to_excel(
+                            writer, sheet_name='Инструкция', index=False
+                        )
+                    
+                    excel_data = excel_buffer.getvalue()
+                    b64 = base64.b64encode(excel_data).decode()
+                    href = f'<a href="data:application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;base64,{b64}" download="google_maps_data.xlsx">📥 Скачать Excel для Google Карт</a>'
+                    st.markdown(href, unsafe_allow_html=True)
+                    
+                    # Показываем предпросмотр данных
+                    st.success("✅ Файл готов к скачиванию!")
+                    
+                    with st.expander("👁️ Предпросмотр данных для Google Карт", expanded=False):
+                        st.dataframe(google_maps_df[['Название', 'Широта', 'Долгота', 'Аудитор', 'Полигон', 'Цвет_полигона']].head(10), 
+                                   use_container_width=True)
+                        
+                except Exception as e:
+                    st.error(f"❌ Ошибка при создании файла для Google Карт: {str(e)}")
+        
+        with col3:
+            st.markdown("### 🔄 Управление")
             
-        except Exception as e:
-            st.error(f"❌ Ошибка при создании полного отчета: {str(e)}")
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+            if st.button("🔄 Обновить полигоны", type="secondary", use_container_width=True):
+                st.session_state.generate_polygons_flag = True
+                st.rerun()
+            
+            st.markdown("---")
+            st.markdown("### 🎨 Цветовая схема")
+            
+            # Показываем цвета полигонов
+            if polygons:
+                st.markdown("**Цвета полигонов:**")
+                for polygon_name in list(polygons.keys())[:5]:  # Показываем первые 5
+                    color_info = polygon_colors.get(polygon_name, {'point_color': '#3366cc'})
+                    st.markdown(f"""
+                    <div style="display: flex; align-items: center; margin: 5px 0;">
+                        <div style="
+                            width: 20px; 
+                            height: 20px; 
+                            background-color: {color_info['point_color']}; 
+                            margin-right: 10px;
+                            border-radius: 3px;
+                        "></div>
+                        <span>{polygon_name}</span>
+                    </div>
+                    """, unsafe_allow_html=True)
+            
+            st.markdown("---")
+            st.markdown("### 📋 Инструкция")
+            st.info("""
+            **Цветовая схема:**
+            - Каждый полигон имеет уникальный цвет
+            - Точки внутри полигона того же цвета
+            - Полигоны прозрачные (20%), точки непрозрачные (80%)
+            
+            **Для Google Карт:**
+            1. Скачайте Excel файл
+            2. Откройте Google Карты → Создать карту
+            3. Импортируйте файл
+            4. Выберите лист "Для_Google_Карт"
+            5. Настройте: Широта → Latitude, Долгота → Longitude
+            """)
 
