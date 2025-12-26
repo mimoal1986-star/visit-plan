@@ -802,179 +802,38 @@ def calculate_statistics(points_df, visits_df, detailed_plan_df, year, quarter):
     )
 
 def create_google_maps_excel(points_df, polygons):
-    """Создает Excel файл для импорта в Google Maps с разделенными атрибутами"""
+    """Создает Excel файл для импорта в Google Maps (упрощенная версия)"""
     import io
     
     excel_buffer = io.BytesIO()
     
     with pd.ExcelWriter(excel_buffer, engine='openpyxl') as writer:
-        # Лист 1: Точки для карты (разделенные атрибуты)
+        # Лист 1: Точки для карты (только основные данные)
         map_data = []
         
-        # ШАГ 1: Создаем быстрый словарь для поиска полигонов по точкам
-        point_to_polygon_info = {}
-        
-        # Пройдем по всем полигонам и создадим отображение точка -> полигон
-        for poly_name, poly_info in polygons.items():
-            auditor = poly_info.get('auditor', 'Неизвестно')
-            city = poly_info.get('city', 'Неизвестно')
-            
-            # Получаем все точки этого полигона
-            for point_data in poly_info.get('points', []):
-                if point_data and len(point_data) >= 3:
-                    point_id = str(point_data[0]).strip()  # ID точки как строка
-                    point_to_polygon_info[point_id] = {
-                        'polygon': poly_name,
-                        'auditor': auditor,
-                        'city': city
-                    }
-        
-        # ШАГ 2: Обрабатываем все точки
         for _, point in points_df.iterrows():
-            # Получаем ID точки
-            point_id = str(point['ID_Точки']).strip()
+            # Находим полигон точки
+            point_polygon = "Не назначен"
+            point_auditor = "Неизвестно"
             
-            # Ищем информацию о полигоне
-            poly_info = point_to_polygon_info.get(point_id)
+            # Упрощенный поиск (без вложенных циклов)
+            for poly_name, poly_info in polygons.items():
+                point_ids = [pt[0] for pt in poly_info.get('points', []) if len(pt) >= 3]
+                if point['ID_Точки'] in point_ids:
+                    point_polygon = poly_name
+                    point_auditor = poly_info.get('auditor', 'Неизвестно')
+                    break
             
-            if poly_info:
-                point_polygon = poly_info['polygon']
-                point_auditor = poly_info['auditor']
-                polygon_city = poly_info['city']
-            else:
-                point_polygon = "Не назначен"
-                point_auditor = "Неизвестно"
-                polygon_city = point.get('Город', 'Неизвестно')
-            
-            # Получаем данные точки
-            point_type = point.get('Тип', 'Неизвестно')
-            city = point.get('Город', 'Неизвестно')
-            address = point.get('Адрес', 'Не указан')
-            visits = point.get('Кол-во_посещений', 1)
-            name = point.get('Название_Точки', point['ID_Точки'])
-            
-            # Определяем цвет маркера на основе типа
-            color_mapping = {
-                'Мини': 'blue',
-                'Супер': 'green',
-                'Гипер': 'red',
-                'Convenience': 'blue',
-                'Supermarket': 'green',
-                'Hypermarket': 'red'
-            }
-            
-            marker_color = color_mapping.get(point_type, 'gray')
-            
-            # Определяем размер маркера на основе количества посещений
-            if visits <= 1:
-                marker_size = 'small'
-            elif visits <= 3:
-                marker_size = 'medium'
-            else:
-                marker_size = 'large'
-            
-            # Форматируем данные для Google Maps
             map_data.append({
-                'Name': name,
-                'Description': f"{name} | {city} | {point_type} | Аудитор: {point_auditor}",
-                'Категория': f"{city} - {point_type}",
-                'ID_Точки': point['ID_Точки'],
-                'Город': city,
-                'Тип_точки': point_type,
-                'Полигон': point_polygon,
-                'Аудитор': point_auditor,
-                'Адрес': address,
-                'Кол-во_посещений': visits,
-                'Цвет_маркера': marker_color,
-                'Размер_маркера': marker_size,
+                'Name': f"{point['Название_Точки']}",
+                'Description': f"Тип: {point.get('Тип', 'Неизвестно')}, Полигон: {point_polygon}, Аудитор: {point_auditor}",
                 'Latitude': point['Широта'],
                 'Longitude': point['Долгота'],
                 'Type': 'Point'
             })
         
-        # Создаем DataFrame
-        if map_data:
-            df_map = pd.DataFrame(map_data)
-            
-            # Оптимальный порядок столбцов для Google Maps
-            column_order = [
-                'Name',
-                'Description',
-                'Категория',
-                'ID_Точки',
-                'Город',
-                'Тип_точки',
-                'Полигон',
-                'Аудитор',
-                'Адрес',
-                'Кол-во_посещений',
-                'Цвет_маркера',
-                'Размер_маркера',
-                'Latitude',
-                'Longitude',
-                'Type'
-            ]
-            
-            # Оставляем только существующие колонки
-            existing_columns = [col for col in column_order if col in df_map.columns]
-            df_map = df_map[existing_columns]
-            
-            # Экспорт в Excel
-            df_map.to_excel(writer, sheet_name='Google Maps Data', index=False)
-            
-            # ДЕБАГ: Создаем лист с отображением точек и полигонов для проверки
-            debug_data = []
-            for point_id, poly_info in point_to_polygon_info.items():
-                debug_data.append({
-                    'ID_Точки': point_id,
-                    'Полигон': poly_info['polygon'],
-                    'Аудитор': poly_info['auditor'],
-                    'Город_полигона': poly_info['city']
-                })
-            
-            if debug_data:
-                df_debug = pd.DataFrame(debug_data)
-                df_debug.to_excel(writer, sheet_name='Отладка_связей', index=False)
-            
-            # Лист 2: Сводка по полигонам
-            polygon_stats = []
-            for poly_name, poly_info in polygons.items():
-                polygon_stats.append({
-                    'Полигон': poly_name,
-                    'Аудитор': poly_info.get('auditor', 'Неизвестно'),
-                    'Город': poly_info.get('city', 'Неизвестно'),
-                    'Количество_точек': len(poly_info.get('points', [])),
-                    'Точки': ', '.join([str(p[0]) for p in poly_info.get('points', []) if len(p) >= 1])
-                })
-            
-            if polygon_stats:
-                df_stats = pd.DataFrame(polygon_stats)
-                df_stats.to_excel(writer, sheet_name='Статистика_полигонов', index=False)
-            
-            # Лист 3: Инструкция
-            instructions = pd.DataFrame({
-                'Шаг': [1, 2, 3, 4, 5],
-                'Действие': [
-                    'Загрузите файл в Google My Maps',
-                    'Настройте координаты',
-                    'Используйте столбцы для фильтрации',
-                    'Настройте стиль маркеров',
-                    'Экспортируйте карту'
-                ],
-                'Подробности': [
-                    'Latitude → Широта, Longitude → Долгота',
-                    'Используйте Тип_точки, Полигон, Аудитор для фильтров',
-                    'Цвет_маркера и Размер_маркера для визуализации',
-                    'Категория для группировки по городу и типу',
-                    'Сохраните карту и поделитесь с коллегами'
-                ]
-            })
-            instructions.to_excel(writer, sheet_name='Инструкция', index=False)
-        else:
-            # Если данных нет, создаем пустой лист
-            pd.DataFrame({'Сообщение': ['Нет данных для экспорта']}).to_excel(
-                writer, sheet_name='Google Maps Data', index=False
-            )
+        df_map = pd.DataFrame(map_data)
+        df_map.to_excel(writer, sheet_name='Google Maps Data', index=False)
     
     return excel_buffer.getvalue()
 
@@ -1657,418 +1516,151 @@ if st.session_state.plan_calculated:
                         st.warning("Нет данных для выгрузки в Excel")
             current_tab += 1
         
-            # ВКЛАДКА 2: План посещений 
-            if "📋 План посещений" in available_tabs:
-                with results_tabs[current_tab]:
-                    st.subheader("📋 План посещений")
+        # ВКЛАДКА 2: План посещений 
+        if "📋 План посещений" in available_tabs:
+            with results_tabs[current_tab]:
+                st.subheader("📋 План посещений")
+                
+                if st.session_state.summary_df is not None:
+                    summary_df = st.session_state.summary_df.copy()
                     
-                    # Создаем вкладки внутри раздела План посещений
-                    plan_tabs = st.tabs(["📅 Распределение по неделям", "🗺️ Отчет по полигонам"])
-                    
-                    with plan_tabs[0]:  # Вкладка распределения по неделям
-                        if st.session_state.summary_df is not None:
-                            summary_df = st.session_state.summary_df.copy()
-                            
-                            if not summary_df.empty:
-                                # Фильтры
-                                st.markdown("### 🔍 Фильтры")
-                                
-                                col1, col2, col3, col4 = st.columns(4)
-                                
-                                with col1:
-                                    # Фильтр по городам
-                                    all_cities = ["Все"] + sorted(summary_df['Город'].unique().tolist())
-                                    selected_city = st.selectbox("Город", all_cities, key="filter_city")
-                                
-                                with col2:
-                                    # Фильтр по аудиторам
-                                    all_auditors = ["Все"] + sorted(summary_df['Аудитор'].unique().tolist())
-                                    selected_auditor = st.selectbox("Аудитор", all_auditors, key="filter_auditor")
-                                
-                                with col3:
-                                    # Фильтр по неделям
-                                    all_weeks = ["Все"] + sorted(summary_df['ISO_Неделя'].unique().tolist())
-                                    selected_week = st.selectbox("Неделя", all_weeks, key="filter_week")
-                                
-                                with col4:
-                                    # Фильтр по полигонам
-                                    all_polygons = ["Все"] + sorted(summary_df['Полигон'].unique().tolist())
-                                    selected_polygon = st.selectbox("Полигон", all_polygons, key="filter_polygon")
-                                
-                                # Применяем фильтры
-                                filtered_df = summary_df.copy()
-                                
-                                if selected_city != "Все":
-                                    filtered_df = filtered_df[filtered_df['Город'] == selected_city]
-                                
-                                if selected_auditor != "Все":
-                                    filtered_df = filtered_df[filtered_df['Аудитор'] == selected_auditor]
-                                
-                                if selected_week != "Все":
-                                    filtered_df = filtered_df[filtered_df['ISO_Неделя'] == selected_week]
-                                
-                                if selected_polygon != "Все":
-                                    filtered_df = filtered_df[filtered_df['Полигон'] == selected_polygon]
-                                
-                                # Показываем статистику фильтра
-                                st.markdown(f"**📊 Найдено записей:** {len(filtered_df)}")
-                                
-                                if len(filtered_df) > 0:
-                                    # Суммарная статистика
-                                    total_plan = filtered_df['План_посещений'].sum()
-                                    total_fact = filtered_df['Факт_посещений'].sum() if 'Факт_посещений' in filtered_df.columns else 0
-                                    completion = round((total_fact / total_plan * 100) if total_plan > 0 else 0, 1)
-                                    
-                                    col1, col2, col3 = st.columns(3)
-                                    with col1:
-                                        st.metric("План посещений", total_plan)
-                                    with col2:
-                                        st.metric("Факт посещений", total_fact)
-                                    with col3:
-                                        st.metric("% выполнения", f"{completion}%")
-                                    
-                                    st.markdown("---")
-                                    
-                                    # Подготовка данных для отображения
-                                    display_df = filtered_df.copy()
-                                    
-                                    # Форматируем даты
-                                    display_df['Дата_начала'] = pd.to_datetime(display_df['Дата_начала']).dt.strftime('%d.%m.%Y')
-                                    display_df['Дата_окончания'] = pd.to_datetime(display_df['Дата_окончания']).dt.strftime('%d.%m.%Y')
-                                    
-                                    # Переименовываем колонки для читаемости
-                                    display_df = display_df.rename(columns={
-                                        'ISO_Неделя': 'Неделя',
-                                        'Дата_начала': 'Начало недели',
-                                        'Дата_окончания': 'Конец недели',
-                                        'План_посещений': 'План',
-                                        'Факт_посещений': 'Факт',
-                                        '%_выполнения': '% выполнения'
-                                    })
-                                    
-                                    # Выбираем колонки для отображения
-                                    display_columns = ['Город', 'Полигон', 'Аудитор', 'Неделя', 
-                                                     'Начало недели', 'Конец недели', 'План', 'Факт', '% выполнения']
-                                    
-                                    # Оставляем только существующие колонки
-                                    display_columns = [col for col in display_columns if col in display_df.columns]
-                                    
-                                    st.dataframe(
-                                        display_df[display_columns], 
-                                        use_container_width=True, 
-                                        height=400,
-                                        hide_index=True
-                                    )
-                                    
-                                    # Выгрузка в Excel
-                                    st.markdown("---")
-                                    st.subheader("💾 Выгрузка данных")
-                                    
-                                    col1, col2 = st.columns(2)
-                                    
-                                    with col1:
-                                        # Выгрузка отфильтрованных данных
-                                        try:
-                                            excel_buffer = io.BytesIO()
-                                            with pd.ExcelWriter(excel_buffer, engine='openpyxl') as writer:
-                                                filtered_df.to_excel(writer, sheet_name='План_посещений', index=False)
-                                            
-                                            excel_data = excel_buffer.getvalue()
-                                            st.download_button(
-                                                label="📥 Скачать Excel (фильтр)",
-                                                data=excel_data,
-                                                file_name=f"план_посещений_{year}_Q{quarter}_фильтр.xlsx",
-                                                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                                                use_container_width=True
-                                            )
-                                        except Exception as e:
-                                            st.error(f"❌ Ошибка: {str(e)}")
-                                    
-                                    with col2:
-                                        # Выгрузка всех данных
-                                        try:
-                                            excel_buffer = io.BytesIO()
-                                            with pd.ExcelWriter(excel_buffer, engine='openpyxl') as writer:
-                                                summary_df.to_excel(writer, sheet_name='План_посещений', index=False)
-                                            
-                                            excel_data = excel_buffer.getvalue()
-                                            st.download_button(
-                                                label="📥 Скачать Excel (все данные)",
-                                                data=excel_data,
-                                                file_name=f"план_посещений_{year}_Q{quarter}_все.xlsx",
-                                                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                                                use_container_width=True
-                                            )
-                                        except Exception as e:
-                                            st.error(f"❌ Ошибка: {str(e)}")
-                                else:
-                                    st.info("Нет данных по выбранным фильтрам")
-                            else:
-                                st.info("Нет данных для отображения")
-                    
-                    with plan_tabs[1]:  # Вкладка отчета по полигонам
-                        st.subheader("🗺️ Отчет по полигонам")
-                        st.info("Отчет показывает распределение точек по полигонам, городам и аудиторам")
+                    if not summary_df.empty:
+                        # Фильтры
+                        st.markdown("### 🔍 Фильтры")
                         
-                        # Проверяем наличие данных
-                        if (st.session_state.points_df is not None and 
-                            st.session_state.polygons is not None and 
-                            st.session_state.auditors_df is not None):
+                        col1, col2, col3, col4 = st.columns(4)
+                        
+                        with col1:
+                            # Фильтр по городам
+                            all_cities = ["Все"] + sorted(summary_df['Город'].unique().tolist())
+                            selected_city = st.selectbox("Город", all_cities, key="filter_city")
+                        
+                        with col2:
+                            # Фильтр по аудиторам
+                            all_auditors = ["Все"] + sorted(summary_df['Аудитор'].unique().tolist())
+                            selected_auditor = st.selectbox("Аудитор", all_auditors, key="filter_auditor")
+                        
+                        with col3:
+                            # Фильтр по неделям
+                            all_weeks = ["Все"] + sorted(summary_df['ISO_Неделя'].unique().tolist())
+                            selected_week = st.selectbox("Неделя", all_weeks, key="filter_week")
+                        
+                        with col4:
+                            # Фильтр по полигонам
+                            all_polygons = ["Все"] + sorted(summary_df['Полигон'].unique().tolist())
+                            selected_polygon = st.selectbox("Полигон", all_polygons, key="filter_polygon")
+                        
+                        # Применяем фильтры
+                        filtered_df = summary_df.copy()
+                        
+                        if selected_city != "Все":
+                            filtered_df = filtered_df[filtered_df['Город'] == selected_city]
+                        
+                        if selected_auditor != "Все":
+                            filtered_df = filtered_df[filtered_df['Аудитор'] == selected_auditor]
+                        
+                        if selected_week != "Все":
+                            filtered_df = filtered_df[filtered_df['ISO_Неделя'] == selected_week]
+                        
+                        if selected_polygon != "Все":
+                            filtered_df = filtered_df[filtered_df['Полигон'] == selected_polygon]
+                        
+                        # Показываем статистику фильтра
+                        st.markdown(f"**📊 Найдено записей:** {len(filtered_df)}")
+                        
+                        if len(filtered_df) > 0:
+                            # Суммарная статистика
+                            total_plan = filtered_df['План_посещений'].sum()
+                            total_fact = filtered_df['Факт_посещений'].sum() if 'Факт_посещений' in filtered_df.columns else 0
+                            completion = round((total_fact / total_plan * 100) if total_plan > 0 else 0, 1)
                             
-                            # Создаем полный отчет по полигонам
-                            polygon_report_data = []
+                            col1, col2, col3 = st.columns(3)
+                            with col1:
+                                st.metric("План посещений", total_plan)
+                            with col2:
+                                st.metric("Факт посещений", total_fact)
+                            with col3:
+                                st.metric("% выполнения", f"{completion}%")
                             
-                            # Проходим по всем полигонам
-                            for poly_name, poly_info in st.session_state.polygons.items():
-                                city = poly_info.get('city', 'Неизвестно')
-                                auditor = poly_info.get('auditor', 'Неизвестно')
-                                points_count = len(poly_info.get('points', []))
-                                
-                                # Получаем ID точек этого полигона
-                                point_ids = []
-                                for point_data in poly_info.get('points', []):
-                                    if len(point_data) > 0:
-                                        point_ids.append(str(point_data[0]))
-                                
-                                # Находим детали по точкам из points_df
-                                if point_ids and st.session_state.points_df is not None:
-                                    points_details = st.session_state.points_df[
-                                        st.session_state.points_df['ID_Точки'].isin(point_ids)
-                                    ]
-                                    
-                                    # Добавляем каждую точку в отчет
-                                    for _, point in points_details.iterrows():
-                                        polygon_report_data.append({
-                                            'Город': city,
-                                            'Полигон': poly_name,
-                                            'ID_Точки': point['ID_Точки'],
-                                            'Название_Точки': point.get('Название_Точки', ''),
-                                            'Тип_точки': point.get('Тип', ''),
-                                            'Адрес': point.get('Адрес', ''),
-                                            'Широта': point['Широта'],
-                                            'Долгота': point['Долгота'],
-                                            'Кол-во_посещений': point.get('Кол-во_посещений', 1),
-                                            'Аудитор': auditor
-                                        })
+                            st.markdown("---")
                             
-                            # Создаем DataFrame отчета
-                            if polygon_report_data:
-                                polygon_report_df = pd.DataFrame(polygon_report_data)
-                                
-                                # Показываем сводную статистику
-                                st.markdown("### 📊 Сводная статистика по полигонам")
-                                
-                                # Группировка по городам и полигонам
-                                summary_stats = polygon_report_df.groupby(['Город', 'Полигон', 'Аудитор']).agg({
-                                    'ID_Точки': 'count',
-                                    'Кол-во_посещений': 'sum'
-                                }).reset_index()
-                                
-                                summary_stats = summary_stats.rename(columns={
-                                    'ID_Точки': 'Количество_точек',
-                                    'Кол-во_посещений': 'Общий_план_посещений'
-                                })
-                                
-                                # Сортируем
-                                summary_stats = summary_stats.sort_values(['Город', 'Полигон'])
-                                
-                                col1, col2, col3 = st.columns(3)
-                                with col1:
-                                    total_polygons = len(summary_stats)
-                                    st.metric("Всего полигонов", total_polygons)
-                                with col2:
-                                    total_points = summary_stats['Количество_точек'].sum()
-                                    st.metric("Всего точек в отчете", total_points)
-                                with col3:
-                                    total_visits_plan = summary_stats['Общий_план_посещений'].sum()
-                                    st.metric("План посещений", total_visits_plan)
-                                
-                                # Показываем сводную таблицу
-                                st.markdown("### 📋 Сводная таблица полигонов")
-                                st.dataframe(
-                                    summary_stats[['Город', 'Полигон', 'Аудитор', 'Количество_точек', 'Общий_план_посещений']],
-                                    use_container_width=True,
-                                    hide_index=True,
-                                    height=300
-                                )
-                                
-                                # Фильтры для детального отчета
-                                st.markdown("### 🔍 Фильтры детального отчета")
-                                
-                                col1, col2, col3 = st.columns(3)
-                                
-                                with col1:
-                                    # Фильтр по городам
-                                    report_cities = ["Все"] + sorted(polygon_report_df['Город'].unique().tolist())
-                                    selected_report_city = st.selectbox("Город", report_cities, key="report_city")
-                                
-                                with col2:
-                                    # Фильтр по полигонам
-                                    report_polygons = ["Все"] + sorted(polygon_report_df['Полигон'].unique().tolist())
-                                    selected_report_polygon = st.selectbox("Полигон", report_polygons, key="report_polygon")
-                                
-                                with col3:
-                                    # Фильтр по аудиторам
-                                    report_auditors = ["Все"] + sorted(polygon_report_df['Аудитор'].unique().tolist())
-                                    selected_report_auditor = st.selectbox("Аудитор", report_auditors, key="report_auditor")
-                                
-                                # Применяем фильтры к детальному отчету
-                                filtered_report_df = polygon_report_df.copy()
-                                
-                                if selected_report_city != "Все":
-                                    filtered_report_df = filtered_report_df[filtered_report_df['Город'] == selected_report_city]
-                                
-                                if selected_report_polygon != "Все":
-                                    filtered_report_df = filtered_report_df[filtered_report_df['Полигон'] == selected_report_polygon]
-                                
-                                if selected_report_auditor != "Все":
-                                    filtered_report_df = filtered_report_df[filtered_report_df['Аудитор'] == selected_report_auditor]
-                                
-                                # Показываем детальный отчет
-                                st.markdown(f"### 📋 Детальный отчет по точкам (найдено: {len(filtered_report_df)})")
-                                
-                                if not filtered_report_df.empty:
-                                    # Форматируем для отображения
-                                    display_report_df = filtered_report_df.copy()
+                            # Подготовка данных для отображения
+                            display_df = filtered_df.copy()
+                            
+                            # Форматируем даты
+                            display_df['Дата_начала'] = pd.to_datetime(display_df['Дата_начала']).dt.strftime('%d.%m.%Y')
+                            display_df['Дата_окончания'] = pd.to_datetime(display_df['Дата_окончания']).dt.strftime('%d.%m.%Y')
+                            
+                            # Переименовываем колонки для читаемости
+                            display_df = display_df.rename(columns={
+                                'ISO_Неделя': 'Неделя',
+                                'Дата_начала': 'Начало недели',
+                                'Дата_окончания': 'Конец недели',
+                                'План_посещений': 'План',
+                                'Факт_посещений': 'Факт',
+                                '%_выполнения': '% выполнения'
+                            })
+                            
+                            # Выбираем колонки для отображения
+                            display_columns = ['Город', 'Полигон', 'Аудитор', 'Неделя', 
+                                             'Начало недели', 'Конец недели', 'План', 'Факт', '% выполнения']
+                            
+                            # Оставляем только существующие колонки
+                            display_columns = [col for col in display_columns if col in display_df.columns]
+                            
+                            st.dataframe(
+                                display_df[display_columns], 
+                                use_container_width=True, 
+                                height=400,
+                                hide_index=True
+                            )
+                            
+                            # Выгрузка в Excel
+                            st.markdown("---")
+                            st.subheader("💾 Выгрузка данных")
+                            
+                            col1, col2 = st.columns(2)
+                            
+                            with col1:
+                                # Выгрузка отфильтрованных данных
+                                try:
+                                    excel_buffer = io.BytesIO()
+                                    with pd.ExcelWriter(excel_buffer, engine='openpyxl') as writer:
+                                        filtered_df.to_excel(writer, sheet_name='План_посещений', index=False)
                                     
-                                    # Переименовываем колонки
-                                    display_report_df = display_report_df.rename(columns={
-                                        'ID_Точки': 'ID Точки',
-                                        'Название_Точки': 'Название точки',
-                                        'Тип_точки': 'Тип точки',
-                                        'Кол-во_посещений': 'Кол-во посещений'
-                                    })
-                                    
-                                    # Выбираем порядок колонок
-                                    display_columns = ['Город', 'Полигон', 'Аудитор', 'ID Точки', 
-                                                     'Название точки', 'Тип точки', 'Адрес', 
-                                                     'Широта', 'Долгота', 'Кол-во посещений']
-                                    
-                                    st.dataframe(
-                                        display_report_df[display_columns],
-                                        use_container_width=True,
-                                        height=400,
-                                        hide_index=True
+                                    excel_data = excel_buffer.getvalue()
+                                    st.download_button(
+                                        label="📥 Скачать Excel (фильтр)",
+                                        data=excel_data,
+                                        file_name=f"план_посещений_{year}_Q{quarter}_фильтр.xlsx",
+                                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                                        use_container_width=True
                                     )
+                                except Exception as e:
+                                    st.error(f"❌ Ошибка: {str(e)}")
+                            
+                            with col2:
+                                # Выгрузка всех данных
+                                try:
+                                    excel_buffer = io.BytesIO()
+                                    with pd.ExcelWriter(excel_buffer, engine='openpyxl') as writer:
+                                        summary_df.to_excel(writer, sheet_name='План_посещений', index=False)
                                     
-                                    # Выгрузка отчетов в Excel
-                                    st.markdown("---")
-                                    st.subheader("💾 Выгрузка отчетов по полигонам")
-                                    
-                                    col1, col2 = st.columns(2)
-                                    
-                                    with col1:
-                                        # Выгрузка сводного отчета
-                                        try:
-                                            excel_buffer = io.BytesIO()
-                                            with pd.ExcelWriter(excel_buffer, engine='openpyxl') as writer:
-                                                # Лист 1: Сводная статистика
-                                                summary_stats.to_excel(writer, sheet_name='Сводная_статистика', index=False)
-                                                
-                                                # Лист 2: Детальный отчет (все данные)
-                                                polygon_report_df.to_excel(writer, sheet_name='Детальный_отчет', index=False)
-                                                
-                                                # Лист 3: Детальный отчет (фильтр)
-                                                if len(filtered_report_df) < len(polygon_report_df):
-                                                    filtered_report_df.to_excel(writer, sheet_name='Отчет_по_фильтру', index=False)
-                                            
-                                            excel_data = excel_buffer.getvalue()
-                                            st.download_button(
-                                                label="📥 Скачать полный отчет по полигонам",
-                                                data=excel_data,
-                                                file_name=f"отчет_полигоны_{year}_Q{quarter}.xlsx",
-                                                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                                                use_container_width=True
-                                            )
-                                        except Exception as e:
-                                            st.error(f"❌ Ошибка при создании отчета: {str(e)}")
-                                    
-                                    with col2:
-                                        # Быстрая выгрузка только детального отчета
-                                        try:
-                                            csv_data = filtered_report_df.to_csv(index=False, sep=';').encode('utf-8')
-                                            st.download_button(
-                                                label="📥 Скачать CSV (фильтр)",
-                                                data=csv_data,
-                                                file_name=f"полигоны_фильтр_{year}_Q{quarter}.csv",
-                                                mime="text/csv",
-                                                use_container_width=True
-                                            )
-                                        except Exception as e:
-                                            st.error(f"❌ Ошибка при создании CSV: {str(e)}")
-                                    
-                                    # Дополнительные опции
-                                    st.markdown("---")
-                                    with st.expander("⚙️ Дополнительные опции выгрузки", expanded=False):
-                                        col1, col2 = st.columns(2)
-                                        
-                                        with col1:
-                                            # Выгрузка по городам отдельными файлами
-                                            if st.button("🗂️ Разделить по городам", key="split_by_city"):
-                                                with st.spinner("Создание файлов по городам..."):
-                                                    try:
-                                                        # Создаем zip архив
-                                                        import zipfile
-                                                        zip_buffer = io.BytesIO()
-                                                        
-                                                        with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zip_file:
-                                                            for city in polygon_report_df['Город'].unique():
-                                                                city_data = polygon_report_df[polygon_report_df['Город'] == city]
-                                                                
-                                                                # Создаем Excel для города
-                                                                city_buffer = io.BytesIO()
-                                                                with pd.ExcelWriter(city_buffer, engine='openpyxl') as writer:
-                                                                    city_data.to_excel(writer, sheet_name='Данные', index=False)
-                                                                
-                                                                city_buffer.seek(0)
-                                                                zip_file.writestr(f"{city}_полигоны.xlsx", city_buffer.read())
-                                                        
-                                                        zip_buffer.seek(0)
-                                                        
-                                                        st.download_button(
-                                                            label=f"📦 Скачать ZIP ({len(polygon_report_df['Город'].unique())} файлов)",
-                                                            data=zip_buffer.getvalue(),
-                                                            file_name=f"полигоны_по_городам_{year}_Q{quarter}.zip",
-                                                            mime="application/zip",
-                                                            use_container_width=True
-                                                        )
-                                                    except Exception as e:
-                                                        st.error(f"❌ Ошибка: {str(e)}")
-                                        
-                                        with col2:
-                                            # Выгрузка для карт
-                                            if st.button("🗺️ Выгрузить для карт", key="export_for_maps"):
-                                                try:
-                                                    # Создаем упрощенный формат для карт
-                                                    maps_data = filtered_report_df[['ID_Точки', 'Название_Точки', 
-                                                                                  'Широта', 'Долгота', 'Город', 
-                                                                                  'Полигон', 'Аудитор']].copy()
-                                                    
-                                                    maps_data['Описание'] = maps_data.apply(
-                                                        lambda x: f"Город: {x['Город']}, Полигон: {x['Полигон']}, Аудитор: {x['Аудитор']}", 
-                                                        axis=1
-                                                    )
-                                                    
-                                                    maps_csv = maps_data.to_csv(index=False, sep=',').encode('utf-8')
-                                                    
-                                                    st.download_button(
-                                                        label="🗺️ Скачать для импорта в карты",
-                                                        data=maps_csv,
-                                                        file_name=f"карты_полигоны_{year}_Q{quarter}.csv",
-                                                        mime="text/csv",
-                                                        use_container_width=True
-                                                    )
-                                                except Exception as e:
-                                                    st.error(f"❌ Ошибка: {str(e)}")
-                                else:
-                                    st.info("Нет данных по выбранным фильтрам")
-                            else:
-                                st.info("Нет данных для отчета по полигонам")
+                                    excel_data = excel_buffer.getvalue()
+                                    st.download_button(
+                                        label="📥 Скачать Excel (все данные)",
+                                        data=excel_data,
+                                        file_name=f"план_посещений_{year}_Q{quarter}_все.xlsx",
+                                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                                        use_container_width=True
+                                    )
+                                except Exception as e:
+                                    st.error(f"❌ Ошибка: {str(e)}")
                         else:
-                            st.warning("⚠️ Недостаточно данных для формирования отчета по полигонам")
-                            st.info("Необходимы данные: точки (points_df), полигоны (polygons) и аудиторы (auditors_df)")
-                    
-                    current_tab += 1
+                            st.info("Нет данных по выбранным фильтрам")
+                    else:
+                        st.info("Нет данных для отображения")
+            current_tab += 1
         
         # ВКЛАДКА 3: Диаграммы
         if "📈 Диаграммы" in available_tabs:
@@ -2375,10 +1967,4 @@ if st.session_state.plan_calculated:
                   f"{len(st.session_state.polygons) if st.session_state.polygons else 0} полигонов, "
                   f"{len(st.session_state.auditors_df) if st.session_state.auditors_df is not None else 0} аудиторов")
     current_tab += 1
-
-
-
-
-
-
 
