@@ -1429,8 +1429,7 @@ if st.session_state.plan_calculated:
     # Создаем вкладки
     results_tabs = st.tabs([
         "📊 Статистика по городам",
-        "📋 Сводный план",
-        "📍 Детализация",
+        "📋 План посещений",
         "📈 Диаграммы",
         "🗺️ Карта полигонов"
     ])
@@ -1471,104 +1470,152 @@ if st.session_state.plan_calculated:
                 st.warning("Нет данных для выгрузки в Excel")
             
     
-    # ВКЛАДКА 2: Сводный план
+       # ВКЛАДКА 2: План посещений 
     with results_tabs[1]:
-        st.subheader("📋 Сводный план посещений")
+        st.subheader("📋 План посещений")
         
         if st.session_state.summary_df is not None:
             summary_df = st.session_state.summary_df.copy()
             
-            # Простая таблица без фильтров для начала
             if not summary_df.empty:
-                display_df = summary_df.copy()
+                # Фильтры
+                st.markdown("### 🔍 Фильтры")
                 
-                # Форматируем даты
-                display_df['Дата_начала'] = pd.to_datetime(display_df['Дата_начала']).dt.strftime('%d.%m.%Y')
-                display_df['Дата_окончания'] = pd.to_datetime(display_df['Дата_окончания']).dt.strftime('%d.%m.%Y')
+                col1, col2, col3, col4 = st.columns(4)
                 
-                # Переименовываем колонки
-                display_df = display_df.rename(columns={
-                    'ISO_Неделя': 'Неделя',
-                    'Дата_начала': 'Начало недели',
-                    'Дата_окончания': 'Конец недели',
-                    'План_посещений': 'План',
-                    'Факт_посещений': 'Факт',
-                    '%_выполнения': '% выполнения'
-                })
+                with col1:
+                    # Фильтр по городам
+                    all_cities = ["Все"] + sorted(summary_df['Город'].unique().tolist())
+                    selected_city = st.selectbox("Город", all_cities, key="filter_city")
                 
-                st.dataframe(display_df, use_container_width=True, height=400)
+                with col2:
+                    # Фильтр по аудиторам
+                    all_auditors = ["Все"] + sorted(summary_df['Аудитор'].unique().tolist())
+                    selected_auditor = st.selectbox("Аудитор", all_auditors, key="filter_auditor")
                 
-                # Выгрузка в Excel - С ПРОВЕРКОЙ
-                if not summary_df.empty:
-                    try:
-                        excel_buffer = io.BytesIO()
-                        with pd.ExcelWriter(excel_buffer, engine='openpyxl') as writer:
-                            summary_df.to_excel(writer, sheet_name='Сводный_план', index=False)
-                        
-                        excel_data = excel_buffer.getvalue()
-                        b64 = base64.b64encode(excel_data).decode()
-                        href = f'<a href="data:application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;base64,{b64}" download="сводный_план_{year}_Q{quarter}.xlsx">📥 Скачать Excel</a>'
-                        st.markdown(href, unsafe_allow_html=True)
-                    except Exception as e:
-                        st.error(f"❌ Ошибка при создании Excel файла: {str(e)}")
-                else:
-                    st.warning("Нет данных для выгрузки в Excel")
-            else:
-                st.info("Нет данных для отображения")
-
-    # ВКЛАДКА 3: Детализация
-    with results_tabs[2]:
-        st.subheader("📍 Детализация посещений")
-        
-        if st.session_state.details_df is not None:
-            details_df = st.session_state.details_df.copy()
-            
-            # Простая таблица
-            if not details_df.empty:
-                # Проверяем, какие колонки реально есть в данных
-                available_columns = []
-                expected_columns = ['Город', 'Полигон', 'Аудитор', 'ISO_Неделя', 
-                                   'ID_Точки', 'Название_Точки', 'Тип', 
-                                   'План_посещений', 'Факт_посещений', 'План_выполнен']
+                with col3:
+                    # Фильтр по неделям
+                    all_weeks = ["Все"] + sorted(summary_df['ISO_Неделя'].unique().tolist())
+                    selected_week = st.selectbox("Неделя", all_weeks, key="filter_week")
                 
-                for col in expected_columns:
-                    if col in details_df.columns:
-                        available_columns.append(col)
+                with col4:
+                    # Фильтр по полигонам
+                    all_polygons = ["Все"] + sorted(summary_df['Полигон'].unique().tolist())
+                    selected_polygon = st.selectbox("Полигон", all_polygons, key="filter_polygon")
                 
-                if available_columns:
-                    display_df = details_df[available_columns].copy()
-                    st.dataframe(display_df, use_container_width=True, height=400)
+                # Применяем фильтры
+                filtered_df = summary_df.copy()
+                
+                if selected_city != "Все":
+                    filtered_df = filtered_df[filtered_df['Город'] == selected_city]
+                
+                if selected_auditor != "Все":
+                    filtered_df = filtered_df[filtered_df['Аудитор'] == selected_auditor]
+                
+                if selected_week != "Все":
+                    filtered_df = filtered_df[filtered_df['ISO_Неделя'] == selected_week]
+                
+                if selected_polygon != "Все":
+                    filtered_df = filtered_df[filtered_df['Полигон'] == selected_polygon]
+                
+                # Показываем статистику фильтра
+                st.markdown(f"**📊 Найдено записей:** {len(filtered_df)}")
+                
+                if len(filtered_df) > 0:
+                    # Суммарная статистика
+                    total_plan = filtered_df['План_посещений'].sum()
+                    total_fact = filtered_df['Факт_посещений'].sum() if 'Факт_посещений' in filtered_df.columns else 0
+                    completion = round((total_fact / total_plan * 100) if total_plan > 0 else 0, 1)
                     
-                    # Показываем информацию о недостающих колонках
-                    missing_columns = set(expected_columns) - set(available_columns)
-                    if missing_columns:
-                        st.warning(f"⚠️ Отсутствуют колонки: {', '.join(missing_columns)}")
+                    col1, col2, col3 = st.columns(3)
+                    with col1:
+                        st.metric("План посещений", total_plan)
+                    with col2:
+                        st.metric("Факт посещений", total_fact)
+                    with col3:
+                        st.metric("% выполнения", f"{completion}%")
                     
-                    # Выгрузка в Excel - С ПРОВЕРКОЙ
-                    if not details_df.empty:
+                    st.markdown("---")
+                    
+                    # Подготовка данных для отображения
+                    display_df = filtered_df.copy()
+                    
+                    # Форматируем даты
+                    display_df['Дата_начала'] = pd.to_datetime(display_df['Дата_начала']).dt.strftime('%d.%m.%Y')
+                    display_df['Дата_окончания'] = pd.to_datetime(display_df['Дата_окончания']).dt.strftime('%d.%m.%Y')
+                    
+                    # Переименовываем колонки для читаемости
+                    display_df = display_df.rename(columns={
+                        'ISO_Неделя': 'Неделя',
+                        'Дата_начала': 'Начало недели',
+                        'Дата_окончания': 'Конец недели',
+                        'План_посещений': 'План',
+                        'Факт_посещений': 'Факт',
+                        '%_выполнения': '% выполнения'
+                    })
+                    
+                    # Выбираем колонки для отображения
+                    display_columns = ['Город', 'Полигон', 'Аудитор', 'Неделя', 
+                                     'Начало недели', 'Конец недели', 'План', 'Факт', '% выполнения']
+                    
+                    # Оставляем только существующие колонки
+                    display_columns = [col for col in display_columns if col in display_df.columns]
+                    
+                    st.dataframe(
+                        display_df[display_columns], 
+                        use_container_width=True, 
+                        height=400,
+                        hide_index=True
+                    )
+                    
+                    # Выгрузка в Excel
+                    st.markdown("---")
+                    st.subheader("💾 Выгрузка данных")
+                    
+                    col1, col2 = st.columns(2)
+                    
+                    with col1:
+                        # Выгрузка отфильтрованных данных
                         try:
                             excel_buffer = io.BytesIO()
                             with pd.ExcelWriter(excel_buffer, engine='openpyxl') as writer:
-                                details_df.to_excel(writer, sheet_name='Детализация', index=False)
+                                filtered_df.to_excel(writer, sheet_name='План_посещений', index=False)
                             
                             excel_data = excel_buffer.getvalue()
-                            b64 = base64.b64encode(excel_data).decode()
-                            href = f'<a href="data:application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;base64,{b64}" download="детализация_{year}_Q{quarter}.xlsx">📥 Скачать Excel</a>'
-                            st.markdown(href, unsafe_allow_html=True)
+                            st.download_button(
+                                label="📥 Скачать Excel (фильтр)",
+                                data=excel_data,
+                                file_name=f"план_посещений_{year}_Q{quarter}_фильтр.xlsx",
+                                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                                use_container_width=True
+                            )
                         except Exception as e:
-                            st.error(f"❌ Ошибка при создании Excel файла: {str(e)}")
-                    else:
-                        st.warning("Нет данных для выгрузки в Excel")
+                            st.error(f"❌ Ошибка: {str(e)}")
+                    
+                    with col2:
+                        # Выгрузка всех данных
+                        try:
+                            excel_buffer = io.BytesIO()
+                            with pd.ExcelWriter(excel_buffer, engine='openpyxl') as writer:
+                                summary_df.to_excel(writer, sheet_name='План_посещений', index=False)
+                            
+                            excel_data = excel_buffer.getvalue()
+                            st.download_button(
+                                label="📥 Скачать Excel (все данные)",
+                                data=excel_data,
+                                file_name=f"план_посещений_{year}_Q{quarter}_все.xlsx",
+                                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                                use_container_width=True
+                            )
+                        except Exception as e:
+                            st.error(f"❌ Ошибка: {str(e)}")
                 else:
-                    st.warning("Нет доступных колонок для отображения")
-                    st.write("Доступные колонки:", list(details_df.columns))
+                    st.info("Нет данных по выбранным фильтрам")
             else:
                 st.info("Нет данных для отображения")
-        else:
-            st.info("Детальные данные еще не рассчитаны")
     
     # ВКЛАДКА 4: Диаграммы
-    with results_tabs[3]:
+    with results_tabs[2]:
         st.subheader("📈 Диаграммы и статистика")
         
         # 1. Диаграмма выполнения плана по городам
@@ -1657,7 +1704,7 @@ if st.session_state.plan_calculated:
                 st.metric("Полигонов", total_polygons)
     
     # ВКЛАДКА 5: Карта полигонов
-    with results_tabs[4]:
+    with results_tabs[3]:
         st.subheader("🗺️ Карта полигонов аудиторов")
         
         if st.session_state.polygons is not None and len(st.session_state.polygons) > 0:
@@ -1831,6 +1878,7 @@ if st.session_state.plan_calculated:
             
         except Exception as e:
             st.error(f"❌ Ошибка при создании полного отчета: {str(e)}")
+
 
 
 
