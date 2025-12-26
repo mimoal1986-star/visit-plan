@@ -798,7 +798,77 @@ def calculate_statistics(points_df, visits_df, detailed_plan_df, year, quarter):
         summary_df,
         detailed_with_fact
     )
+# ==============================================
+# ФУНКЦИИ ДЛЯ ВЫГРУЗКИ ДАННЫХ (ДОБАВЛЯЕМ ЗДЕСЬ)
+# ==============================================
+
+def create_google_maps_excel(points_df, polygons):
+    """Создает Excel файл для импорта в Google Maps"""
+    import io
     
+    excel_buffer = io.BytesIO()
+    
+    with pd.ExcelWriter(excel_buffer, engine='openpyxl') as writer:
+        # Лист 1: Точки для карты
+        map_data = []
+        
+        # Добавляем точки
+        for _, point in points_df.iterrows():
+            # Находим полигон точки
+            point_polygon = "Не назначен"
+            point_auditor = "Неизвестно"
+            
+            for poly_name, poly_info in polygons.items():
+                for pt in poly_info.get('points', []):
+                    if len(pt) >= 3 and pt[0] == point['ID_Точки']:
+                        point_polygon = poly_name
+                        point_auditor = poly_info.get('auditor', 'Неизвестно')
+                        break
+            
+            map_data.append({
+                'Name': f"🏪 {point['Название_Точки']}",
+                'Description': f"""
+                <b>Тип:</b> {point.get('Тип', 'Неизвестно')}<br>
+                <b>Адрес:</b> {point.get('Адрес', 'Не указан')}<br>
+                <b>Полигон:</b> {point_polygon}<br>
+                <b>Аудитор:</b> {point_auditor}<br>
+                <b>ID:</b> {point['ID_Точки']}
+                """.strip(),
+                'Latitude': point['Широта'],
+                'Longitude': point['Долгота'],
+                'Type': 'Point',
+                'Color': 'blue'
+            })
+        
+        # Добавляем центроиды полигонов
+        for poly_name, poly_info in polygons.items():
+            # Вычисляем центроид
+            center_lat, center_lon = calculate_polygon_center(poly_info)
+            
+            if center_lat and center_lon:
+                map_data.append({
+                    'Name': f"🗺️ Полигон: {poly_name}",
+                    'Description': f"""
+                    <b>Полигон:</b> {poly_name}<br>
+                    <b>Аудитор:</b> {poly_info.get('auditor', 'Неизвестно')}<br>
+                    <b>Город:</b> {poly_info.get('city', 'Неизвестно')}<br>
+                    <b>Количество точек:</b> {len(poly_info.get('points', []))}
+                    """.strip(),
+                    'Latitude': center_lat,
+                    'Longitude': center_lon,
+                    'Type': 'Polygon_Center',
+                    'Color': 'red'
+                })
+        
+        df_map = pd.DataFrame(map_data)
+        df_map.to_excel(writer, sheet_name='Google Maps Data', index=False)
+        
+        # Лист 2: Инструкция
+        instructions = pd.DataFrame({
+            'Шаг': [1, 2, 3, 4, 5],
+            'Действие': [
+                'Откройте Google My Maps',
+                '
 # ==============================================
 # РАЗДЕЛ ЗАГРУЗКИ ФАЙЛОВ
 # ==============================================
@@ -1790,3 +1860,4 @@ def create_light_map(points_df, polygons, max_points=200):
             ).add_to(m)
     
     return m
+
