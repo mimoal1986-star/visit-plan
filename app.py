@@ -1534,196 +1534,106 @@ if st.session_state.plan_calculated:
                         st.metric("Полигонов", total_polygons)
             tab_index += 1
         
-        # ВКЛАДКА 4: Карта полигонов
-    with results_tabs[tab_index]:
-        st.subheader("🗺️ Карта полигонов аудиторов")
+def create_google_maps_excel(points_df, polygons):
+    """Создает Excel файл для импорта в Google Maps"""
+    import io
+    
+    excel_buffer = io.BytesIO()
+    
+    with pd.ExcelWriter(excel_buffer, engine='openpyxl') as writer:
+        # Лист 1: Точки для карты
+        map_data = []
         
-        # КНОПКИ ВЫГРУЗКИ ДЛЯ GOOGLE КАРТ
-        st.markdown("### 📤 Выгрузка для Google Карт")
+        # Добавляем точки
+        for _, point in points_df.iterrows():
+            # Находим полигон точки
+            point_polygon = "Не назначен"
+            point_auditor = "Неизвестно"
+            
+            for poly_name, poly_info in polygons.items():
+                for pt in poly_info.get('points', []):
+                    if len(pt) >= 3 and pt[0] == point['ID_Точки']:
+                        point_polygon = poly_name
+                        point_auditor = poly_info.get('auditor', 'Неизвестно')
+                        break
+            
+            map_data.append({
+                'Name': f"🏪 {point['Название_Точки']}",
+                'Description': f"""
+                <b>Тип:</b> {point.get('Тип', 'Неизвестно')}<br>
+                <b>Адрес:</b> {point.get('Адрес', 'Не указан')}<br>
+                <b>Полигон:</b> {point_polygon}<br>
+                <b>Аудитор:</b> {point_auditor}<br>
+                <b>ID:</b> {point['ID_Точки']}
+                """.strip(),
+                'Latitude': point['Широта'],
+                'Longitude': point['Долгота'],
+                'Type': 'Point',
+                'Color': 'blue'
+            })
         
-        col1, col2 = st.columns(2)
+        # Добавляем центроиды полигонов
+        for poly_name, poly_info in polygons.items():
+            # Вычисляем центроид
+            center_lat, center_lon = calculate_polygon_center(poly_info)
+            
+            if center_lat and center_lon:
+                map_data.append({
+                    'Name': f"🗺️ Полигон: {poly_name}",
+                    'Description': f"""
+                    <b>Полигон:</b> {poly_name}<br>
+                    <b>Аудитор:</b> {poly_info.get('auditor', 'Неизвестно')}<br>
+                    <b>Город:</b> {poly_info.get('city', 'Неизвестно')}<br>
+                    <b>Количество точек:</b> {len(poly_info.get('points', []))}
+                    """.strip(),
+                    'Latitude': center_lat,
+                    'Longitude': center_lon,
+                    'Type': 'Polygon_Center',
+                    'Color': 'red'
+                })
         
-        with col1:
-            if st.button("📊 Excel для Google Карт", type="primary", use_container_width=True, key="export_excel_google"):
-                try:
-                    # Проверяем наличие полигонов
-                    if 'polygons' not in st.session_state or not st.session_state.polygons:
-                        st.error("❌ Нет данных полигонов для выгрузки")
-                        st.stop()
-                    
-                    polygons = st.session_state.polygons
-                    
-                    # Создаем DataFrame в формате для Google Карт
-                    google_maps_data = []
-                    
-                    # 1. Добавляем полигоны (как точки - центроиды)
-                    for poly_name, poly_info in polygons.items():
-                        # Пытаемся вычислить центроид полигона
-                        centroid_lat, centroid_lon = None, None
-                        
-                        # Вариант 1: из координат полигона
-                        if 'coordinates' in poly_info and len(poly_info['coordinates']) > 0:
-                            coords = poly_info['coordinates']
-                            # Фильтруем только валидные координаты
-                            valid_coords = [c for c in coords if len(c) >= 2]
-                            if valid_coords:
-                                lats = [c[0] for c in valid_coords]
-                                lons = [c[1] for c in valid_coords]
-                                centroid_lat = sum(lats) / len(lats)
-                                centroid_lon = sum(lons) / len(lons)
-                        
-                        # Вариант 2: из точек полигона
-                        if centroid_lat is None and 'points' in poly_info and len(poly_info['points']) > 0:
-                            points = poly_info['points']
-                            lats = []
-                            lons = []
-                            for point in points:
-                                if len(point) >= 3:
-                                    lats.append(point[1])  # широта
-                                    lons.append(point[2])  # долгота
-                            
-                            if lats and lons:
-                                centroid_lat = sum(lats) / len(lats)
-                                centroid_lon = sum(lons) / len(lons)
-                        
-                        # Если нашли центроид - добавляем в данные
-                        if centroid_lat is not None and centroid_lon is not None:
-                            google_maps_data.append({
-                                'Name': f'🗺️ Полигон: {poly_name}',
-                                'Description': f"""
-                                <b>Полигон:</b> {poly_name}<br>
-                                <b>Аудитор:</b> {poly_info.get('auditor', 'Неизвестно')}<br>
-                                <b>Город:</b> {poly_info.get('city', 'Неизвестно')}<br>
-                                <b>Количество точек:</b> {len(poly_info.get('points', []))}
-                                """,
-                                'Latitude': centroid_lat,
-                                'Longitude': centroid_lon
-                            })
-                    
-                    # 2. Добавляем все точки
-                    if st.session_state.points_df is not None:
-                        points_df = st.session_state.points_df
-                        for _, point in points_df.iterrows():
-                            # Находим к какому полигону принадлежит точка
-                            point_polygon = "Не назначен"
-                            point_auditor = "Неизвестно"
-                            
-                            for poly_name, poly_info in polygons.items():
-                                points_list = poly_info.get('points', [])
-                                for pt in points_list:
-                                    if len(pt) >= 3 and pt[0] == point['ID_Точки']:
-                                        point_polygon = poly_name
-                                        point_auditor = poly_info.get('auditor', 'Неизвестно')
-                                        break
-                            
-                            google_maps_data.append({
-                                'Name': f'🏪 {point["Название_Точки"]}',
-                                'Description': f"""
-                                <b>Тип:</b> {point.get('Тип', 'Неизвестно')}<br>
-                                <b>Адрес:</b> {point.get('Адрес', 'Не указан')}<br>
-                                <b>Полигон:</b> {point_polygon}<br>
-                                <b>Аудитор:</b> {point_auditor}<br>
-                                <b>ID:</b> {point['ID_Точки']}
-                                """,
-                                'Latitude': point['Широта'],
-                                'Longitude': point['Долгота']
-                            })
-                    
-                    # Создаем DataFrame
-                    df_export = pd.DataFrame(google_maps_data)
-                    
-                    if df_export.empty:
-                        st.warning("⚠️ Нет данных для выгрузки")
-                        st.stop()
-                    
-                    # Создаем Excel файл
-                    excel_buffer = io.BytesIO()
-                    with pd.ExcelWriter(excel_buffer, engine='openpyxl') as writer:
-                        # Основной лист для Google Карт
-                        df_export.to_excel(writer, sheet_name='Google Maps Data', index=False)
-                        
-                        # Дополнительный лист с информацией о полигонах
-                        poly_info_data = []
-                        for poly_name, poly_info in polygons.items():
-                            poly_info_data.append({
-                                'Полигон': poly_name,
-                                'Аудитор': poly_info.get('auditor', 'Неизвестно'),
-                                'Город': poly_info.get('city', 'Неизвестно'),
-                                'Количество точек': len(poly_info.get('points', [])),
-                                'Координаты полигона': str(poly_info.get('coordinates', []))
-                            })
-                        
-                        if poly_info_data:
-                            pd.DataFrame(poly_info_data).to_excel(writer, sheet_name='Информация о полигонах', index=False)
-                    
-                    excel_data = excel_buffer.getvalue()
-                    
-                    # Предлагаем скачать
-                    import base64
-                    b64 = base64.b64encode(excel_data).decode()
-                    
-                    # Две ссылки для скачивания
-                    st.markdown(f"""
-                    <a href="data:application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;base64,{b64}" 
-                       download="полигоны_для_google_карт.xlsx" 
-                       style="display: inline-block; padding: 10px 20px; background-color: #4CAF50; color: white; text-decoration: none; border-radius: 5px; font-weight: bold;">
-                       📥 Скачать Excel файл для Google Карт
-                    </a>
-                    """, unsafe_allow_html=True)
-                    
-                    st.success("✅ Файл готов!")
-                    
-                    # Инструкция по импорту
-                    with st.expander("📋 Как импортировать в Google Карты"):
-                        st.markdown("""
-                        1. Откройте [Google Карты](https://www.google.com/maps/d/)
-                        2. Нажмите "Создать карту" → "Новая карта"
-                        3. Нажмите "Импорт" (под заголовком слоя)
-                        4. Выберите скачанный Excel файл
-                        5. Укажите какие колонки содержат:
-                           - **Широта** → Latitude
-                           - **Долгота** → Longitude
-                           - **Название** → Name
-                           - **Описание** → Description
-                        6. Нажмите "Импортировать"
-                        
-                        **Совет:** Создайте отдельные слои для полигонов и точек
-                        """)
-                    
-                except Exception as e:
-                    st.error(f"❌ Ошибка при создании файла: {str(e)}")
-                    import traceback
-                    st.error(f"Детали: {traceback.format_exc()}")
+        df_map = pd.DataFrame(map_data)
+        df_map.to_excel(writer, sheet_name='Google Maps Data', index=False)
         
-        with col2:
-            if st.button("🗺️ KML для Google Earth", type="secondary", use_container_width=True, key="export_kml"):
-                try:
-                    # Простая KML выгрузка
-                    if 'polygons' not in st.session_state or not st.session_state.polygons:
-                        st.error("❌ Нет данных полигонов для выгрузки")
-                        st.stop()
-                    
-                    polygons = st.session_state.polygons
-                    
-                    # Создаем простой KML вручную
-                    kml_content = '''<?xml version="1.0" encoding="UTF-8"?>
+        # Лист 2: Инструкция
+        instructions = pd.DataFrame({
+            'Шаг': [1, 2, 3, 4, 5],
+            'Действие': [
+                'Откройте Google My Maps',
+                'Создайте новую карту → Импорт',
+                'Выберите этот файл Excel',
+                'Сопоставьте столбцы: Latitude, Longitude, Name',
+                'Нажмите "Импортировать"'
+            ]
+        })
+        instructions.to_excel(writer, sheet_name='Инструкция', index=False)
+    
+    return excel_buffer.getvalue()
+
+def create_kml_file(points_df, polygons):
+    """Создает KML файл для Google Earth"""
+    kml_header = '''<?xml version="1.0" encoding="UTF-8"?>
 <kml xmlns="http://www.opengis.net/kml/2.2">
 <Document>
-<name>Полигоны аудиторов</name>
+<name>Полигоны и точки аудиторов</name>
 '''
-                    
-                    # Добавляем полигоны
-                    for poly_name, poly_info in polygons.items():
-                        if 'coordinates' in poly_info and len(poly_info['coordinates']) > 0:
-                            coords = poly_info['coordinates']
-                            coord_string = " ".join([f"{lon},{lat},0" for lat, lon in coords if len([lat, lon]) >= 2])
-                            
-                            if coord_string:
-                                kml_content += f'''
+    
+    kml_content = kml_header
+    
+    # Добавляем полигоны
+    for poly_name, poly_info in polygons.items():
+        if 'coordinates' in poly_info and len(poly_info['coordinates']) > 0:
+            coords = poly_info['coordinates']
+            coord_string = " ".join([f"{lon},{lat},0" for lat, lon in coords if len([lat, lon]) >= 2])
+            
+            if coord_string:
+                kml_content += f'''
 <Placemark>
-<name>Полигон: {poly_name}</name>
+<name>🗺️ {poly_name}</name>
 <description>Аудитор: {poly_info.get('auditor', 'Неизвестно')}
-Город: {poly_info.get('city', 'Неизвестно')}</description>
+Город: {poly_info.get('city', 'Неизвестно')}
+Количество точек: {len(poly_info.get('points', []))}</description>
+<styleUrl>#polygonStyle</styleUrl>
 <Polygon>
 <outerBoundaryIs>
 <LinearRing>
@@ -1733,14 +1643,12 @@ if st.session_state.plan_calculated:
 </Polygon>
 </Placemark>
 '''
-                    
-                    # Добавляем точки
-                    if st.session_state.points_df is not None:
-                        points_df = st.session_state.points_df
-                        for _, point in points_df.iterrows():
-                            kml_content += f'''
+    
+    # Добавляем точки
+    for _, point in points_df.iterrows():
+        kml_content += f'''
 <Placemark>
-<name>{point['Название_Точки']}</name>
+<name>🏪 {point['Название_Точки'][:30]}</name>
 <description>ID: {point['ID_Точки']}
 Тип: {point.get('Тип', 'Неизвестно')}
 Адрес: {point.get('Адрес', 'Не указан')}</description>
@@ -1749,77 +1657,136 @@ if st.session_state.plan_calculated:
 </Point>
 </Placemark>
 '''
-                    
-                    kml_content += '''
+    
+    kml_content += '''
+<Style id="polygonStyle">
+<LineStyle>
+<color>ff0000ff</color>
+<width>2</width>
+</LineStyle>
+<PolyStyle>
+<color>400000ff</color>
+<fill>1</fill>
+<outline>1</outline>
+</PolyStyle>
+</Style>
 </Document>
 </kml>
 '''
-                    
-                    # Предлагаем скачать
-                    import base64
-                    b64 = base64.b64encode(kml_content.encode()).decode()
-                    
-                    st.markdown(f"""
-                    <a href="data:application/vnd.google-earth.kml+xml;base64,{b64}" 
-                       download="полигоны_аудиторов.kml" 
-                       style="display: inline-block; padding: 10px 20px; background-color: #2196F3; color: white; text-decoration: none; border-radius: 5px; font-weight: bold;">
-                       📥 Скачать KML файл для Google Earth
-                    </a>
-                    """, unsafe_allow_html=True)
-                    
-                    st.success("✅ KML файл готов!")
-                    
-                except Exception as e:
-                    st.error(f"❌ Ошибка при создании KML: {str(e)}")
+    
+    return kml_content
+
+def create_full_excel_report(points_df, auditors_df, city_stats_df, 
+                            type_stats_df, summary_df, polygons):
+    """Создает полный отчет Excel со всеми данными"""
+    import io
+    
+    excel_buffer = io.BytesIO()
+    
+    with pd.ExcelWriter(excel_buffer, engine='openpyxl') as writer:
+        # Лист 1: Точки
+        if points_df is not None:
+            points_df.to_excel(writer, sheet_name='Точки', index=False)
         
-        st.markdown("---")
+        # Лист 2: Аудиторы
+        if auditors_df is not None:
+            auditors_df.to_excel(writer, sheet_name='Аудиторы', index=False)
         
-        # ОСТАВШИЙСЯ КОД КАРТЫ
-        if st.session_state.polygons is not None and len(st.session_state.polygons) > 0:
-            polygons = st.session_state.polygons
+        # Лист 3: Статистика по городам
+        if city_stats_df is not None:
+            city_stats_df.to_excel(writer, sheet_name='Статистика_городов', index=False)
+        
+        # Лист 4: План посещений
+        if summary_df is not None:
+            summary_df.to_excel(writer, sheet_name='План_посещений', index=False)
+        
+        # Лист 5: Полигоны
+        if polygons:
+            poly_data = []
+            for poly_name, poly_info in polygons.items():
+                poly_data.append({
+                    'Полигон': poly_name,
+                    'Аудитор': poly_info.get('auditor', 'Неизвестно'),
+                    'Город': poly_info.get('city', 'Неизвестно'),
+                    'Количество_точек': len(poly_info.get('points', [])),
+                    'Координаты_полигона': str(poly_info.get('coordinates', []))
+                })
             
-            if not FOLIUM_AVAILABLE:
-                st.warning("""
-                ⚠️ Для отображения карты установите библиотеки:
-                ```
-                pip install folium streamlit-folium
-                ```
-                После установки перезапустите приложение.
-                """)
-                
-                # Показываем таблицу с полигонами как альтернативу
-                poly_data = []
-                for poly_name, poly_info in polygons.items():
-                    poly_data.append({
-                        'Полигон': poly_name,
-                        'Аудитор': poly_info.get('auditor', 'Неизвестно'),
-                        'Количество точек': len(poly_info.get('points', [])),
-                        'Город': poly_info.get('city', 'Неизвестно')
-                    })
-                
-                if poly_data:
-                    st.dataframe(pd.DataFrame(poly_data), use_container_width=True)
-            else:
-                # Код для отображения карты с folium
-                if st.session_state.points_df is not None:
-                    points_df = st.session_state.points_df
-                    
-                    # Находим центр карты
-                    center_lat = points_df['Широта'].mean()
-                    center_lon = points_df['Долгота'].mean()
-                    
-                    m = folium.Map(location=[center_lat, center_lon], zoom_start=10)
-                    
-                    # Простой код для отображения точек
-                    for _, point in points_df.iterrows():
-                        folium.CircleMarker(
-                            location=[point['Широта'], point['Долгота']],
-                            radius=5,
-                            popup=f"{point['ID_Точки']}: {point['Название_Точки']}",
-                            color='blue',
-                            fill=True
-                        ).add_to(m)
-                    
-                    folium_static(m, width=1200, height=600)
-        else:
-            st.info("Полигоны еще не сгенерированы. Нажмите кнопку 'Рассчитать план'")
+            pd.DataFrame(poly_data).to_excel(writer, sheet_name='Полигоны', index=False)
+    
+    return excel_buffer.getvalue()
+
+def calculate_polygon_center(poly_info):
+    """Вычисляет центроид полигона"""
+    try:
+        # Из координат полигона
+        if 'coordinates' in poly_info and poly_info['coordinates']:
+            coords = poly_info['coordinates']
+            lats = [c[0] for c in coords if len(c) >= 2]
+            lons = [c[1] for c in coords if len(c) >= 2]
+            
+            if lats and lons:
+                return sum(lats) / len(lats), sum(lons) / len(lons)
+        
+        # Из точек полигона
+        if 'points' in poly_info and poly_info['points']:
+            points = poly_info['points']
+            lats = []
+            lons = []
+            
+            for point in points:
+                if len(point) >= 3:
+                    lats.append(point[1])  # широта
+                    lons.append(point[2])  # долгота
+            
+            if lats and lons:
+                return sum(lats) / len(lats), sum(lons) / len(lons)
+    except:
+        pass
+    
+    return None, None
+
+def create_light_map(points_df, polygons, max_points=200):
+    """Создает легкую карту (ограниченное количество точек)"""
+    import folium
+    
+    # Центр карты
+    center_lat = points_df['Широта'].mean()
+    center_lon = points_df['Долгота'].mean()
+    
+    m = folium.Map(location=[center_lat, center_lon], zoom_start=10)
+    
+    # Ограничиваем количество точек для производительности
+    if len(points_df) > max_points:
+        display_points = points_df.sample(max_points)
+        folium.Marker(
+            location=[center_lat, center_lon],
+            popup=f"Показано {max_points} из {len(points_df)} точек",
+            icon=folium.Icon(color='red', icon='info-sign')
+        ).add_to(m)
+    else:
+        display_points = points_df
+    
+    # Простые маркеры для точек
+    for _, point in display_points.iterrows():
+        folium.CircleMarker(
+            location=[point['Широта'], point['Долгота']],
+            radius=3,
+            popup=point['ID_Точки'],
+            color='blue',
+            fill=True
+        ).add_to(m)
+    
+    # Полигоны
+    for poly_name, poly_info in polygons.items():
+        if 'coordinates' in poly_info and len(poly_info['coordinates']) > 2:
+            folium.Polygon(
+                locations=poly_info['coordinates'],
+                popup=f"Полигон: {poly_name}",
+                color='red',
+                weight=2,
+                fill=True,
+                fill_opacity=0.1
+            ).add_to(m)
+    
+    return m
