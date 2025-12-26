@@ -552,36 +552,22 @@ def distribute_visits_by_weeks(points_assignment_df, points_df, year, quarter, c
                 'coefficient': coefficients[i] if i < len(coefficients) else 1.0
             })
         
-        # Для диагностики
-        total_lost_in_cities = 0
-        city_diagnostics = []
+        # Для сбора статистики
+        total_week_visits_by_city = {}
+        total_distributed_to_auditors = {}
         
         # 6. Для каждого города распределяем план
         for city, total_plan in city_plans.items():
-            # Диагностика по городу
-            city_diagnostic = {
-                'city': city,
-                'total_plan': total_plan,
-                'stages': {},
-                'days_distributed': 0,
-                'auditors': 0
-            }
-            
             # Пропускаем города с нулевым планом
             if total_plan <= 0:
-                city_diagnostic['status'] = 'zero_plan'
-                city_diagnostics.append(city_diagnostic)
                 continue
             
             # Получаем аудиторов города
             city_assignments = points_assignment_df[points_assignment_df['Город'] == city]
             if city_assignments.empty:
-                city_diagnostic['status'] = 'no_auditors'
-                city_diagnostics.append(city_diagnostic)
                 continue
                 
             city_auditors = city_assignments['Аудитор'].unique()
-            city_diagnostic['auditors'] = len(city_auditors)
             
             # 6.1. Распределяем общий план по этапам с учетом коэффициентов
             stage_plans = {}
@@ -601,12 +587,6 @@ def distribute_visits_by_weeks(points_assignment_df, points_df, year, quarter, c
                     'start_date': stage['start_date'],
                     'end_date': stage['end_date']
                 }
-                
-                city_diagnostic['stages'][stage['stage_num']] = {
-                    'coefficient': stage['coefficient'],
-                    'calculated': stage_plan,
-                    'rounded': stage_plan_int
-                }
             
             # Этап 4: остаток = общий план - сумма планов 1-3 этапов
             stage_4_plan = total_plan - stages_1_3_plan
@@ -614,12 +594,6 @@ def distribute_visits_by_weeks(points_assignment_df, points_df, year, quarter, c
                 'plan': stage_4_plan,
                 'start_date': stage_dates[3]['start_date'],
                 'end_date': stage_dates[3]['end_date']
-            }
-            
-            city_diagnostic['stages'][4] = {
-                'coefficient': stage_dates[3]['coefficient'],
-                'calculated': total_plan * (stage_dates[3]['coefficient'] / total_coeff),
-                'rounded': stage_4_plan
             }
             
             # 6.2. Для каждого этапа распределяем план по дням
@@ -640,10 +614,7 @@ def distribute_visits_by_weeks(points_assignment_df, points_df, year, quarter, c
                         work_days.append(current_date)
                     current_date += timedelta(days=1)
                 
-                city_diagnostic['stages'][stage_num]['work_days'] = len(work_days)
-                
                 if not work_days:
-                    city_diagnostic['stages'][stage_num]['status'] = 'no_work_days'
                     continue
                 
                 # Распределяем план по дням
@@ -667,32 +638,14 @@ def distribute_visits_by_weeks(points_assignment_df, points_df, year, quarter, c
                         daily_visits[day] += day_plan
                     else:
                         daily_visits[day] = day_plan
-                
-                city_diagnostic['stages'][stage_num]['days_distributed'] = days_plan_int
-            
-            # Суммируем распределенные по дням визиты
-            total_distributed = sum(daily_visits.values())
-            city_diagnostic['days_distributed'] = total_distributed
             
             # Проверка: сумма по дням должна равняться общему плану города
+            total_distributed = sum(daily_visits.values())
             if total_distributed != total_plan:
-                diff = total_plan - total_distributed
-                total_lost_in_cities += diff
-                
-                city_diagnostic['status'] = f'diff_{diff}'
-                city_diagnostic['difference'] = diff
-                
                 # Корректируем на последний день
                 if daily_visits:
                     last_day = max(daily_visits.keys())
-                    daily_visits[last_day] += diff
-                    total_distributed += diff
-                    
-                    city_diagnostic['corrected'] = True
-                    city_diagnostic['corrected_day'] = last_day
-                    city_diagnostic['corrected_amount'] = diff
-            else:
-                city_diagnostic['status'] = 'ok'
+                    daily_visits[last_day] += (total_plan - total_distributed)
             
             # 6.3. Агрегируем по неделям
             week_visits = {}  # {iso_week: общее_количество_визитов}
@@ -700,27 +653,40 @@ def distribute_visits_by_weeks(points_assignment_df, points_df, year, quarter, c
                 iso_week = get_iso_week(day)
                 if iso_week not in week_visits:
                     week_visits[iso_week] = 0
-                week_visits[iso_week] += int(visits)  # Гарантируем целое число
+                week_visits[iso_week] += int(visits)
+            
+            # Сохраняем статистику
+            total_week_visits_by_city[city] = sum(week_visits.values())
             
             # 6.4. Распределяем план недели между аудиторами города
-            week_distributed = 0
+            city_distributed = 0
+            
             for iso_week, week_total_visits in week_visits.items():
                 if week_total_visits <= 0:
                     continue
+                
+                # ВАЖНОЕ ИСПРАВЛЕНИЕ: распределяем ВСЕ визиты
+                # Даже если на аудитора приходится 0 визитов - все равно добавляем запись
                 
                 # Равномерно между аудиторами города
                 visits_per_auditor = week_total_visits // len(city_auditors)
                 remainder = week_total_visits % len(city_auditors)
                 
+                # Создаем список для распределения
+                auditor_visits_list = [visits_per_auditor] * len(city_auditors)
+                
+                # Распределяем остаток
+                for i in range(remainder):
+                    auditor_visits_list[i] += 1
+                
+                # Добавляем записи для всех аудиторов
                 for i, auditor in enumerate(city_auditors):
-                    auditor_visits = visits_per_auditor
-                    if i < remainder:  # Распределяем остаток
-                        auditor_visits += 1
+                    auditor_visits = auditor_visits_list[i]
                     
-                    if auditor_visits <= 0:
-                        continue
+                    if auditor_visits < 0:
+                        auditor_visits = 0
                     
-                    week_distributed += auditor_visits
+                    city_distributed += auditor_visits
                     
                     # Находим полигон аудитора
                     auditor_data = city_assignments[city_assignments['Аудитор'] == auditor]
@@ -742,8 +708,7 @@ def distribute_visits_by_weeks(points_assignment_df, points_df, year, quarter, c
                             'План_посещений': auditor_visits
                         })
             
-            city_diagnostic['week_distributed'] = week_distributed
-            city_diagnostics.append(city_diagnostic)
+            total_distributed_to_auditors[city] = city_distributed
         
         # 7. Сортируем результат
         result_df = pd.DataFrame(weekly_plan)
@@ -755,32 +720,41 @@ def distribute_visits_by_weeks(points_assignment_df, points_df, year, quarter, c
             total_plan_expected = sum(city_plans.values())
             
             if total_plan_calculated != total_plan_expected:
-                # Выводим диагностику
+                # Детальная диагностика
                 st.error(f"❌ Расхождение в итогах: рассчитано {total_plan_calculated}, ожидалось {total_plan_expected}")
                 st.error(f"❌ Потеряно: {total_plan_expected - total_plan_calculated} визитов")
                 
-                # Показываем диагностику по городам
-                with st.expander("🔍 Диагностика по городам (расхождения)"):
-                    problematic_cities = [c for c in city_diagnostics if c.get('difference', 0) != 0]
-                    if problematic_cities:
-                        st.write("Города с потерями визитов:")
-                        for diag in problematic_cities:
-                            st.write(f"- {diag['city']}: план {diag['total_plan']}, распределено {diag['days_distributed']}, разница {diag.get('difference', 0)}")
+                # Показываем диагностику
+                with st.expander("🔍 Подробная диагностика"):
+                    st.write("### Статистика по городам:")
                     
-                    # Показываем все города
-                    st.write("Все города:")
                     diagnostic_data = []
-                    for diag in city_diagnostics:
+                    for city in city_plans:
+                        expected = city_plans[city]
+                        week_total = total_week_visits_by_city.get(city, 0)
+                        distributed = total_distributed_to_auditors.get(city, 0)
+                        
                         diagnostic_data.append({
-                            'Город': diag['city'],
-                            'План': diag['total_plan'],
-                            'Распределено': diag.get('days_distributed', 0),
-                            'Аудиторов': diag.get('auditors', 0),
-                            'Статус': diag.get('status', 'unknown')
+                            'Город': city,
+                            'Ожидалось': expected,
+                            'По неделям': week_total,
+                            'Аудиторам': distributed,
+                            'Разница_недели': expected - week_total,
+                            'Разница_аудиторы': week_total - distributed
                         })
                     
                     diag_df = pd.DataFrame(diagnostic_data)
                     st.dataframe(diag_df, use_container_width=True)
+                    
+                    # Итоги
+                    total_week = sum(total_week_visits_by_city.values())
+                    total_auditor = sum(total_distributed_to_auditors.values())
+                    
+                    st.write(f"**Итого:**")
+                    st.write(f"- Ожидалось: {total_plan_expected}")
+                    st.write(f"- После распределения по неделям: {total_week}")
+                    st.write(f"- После распределения аудиторам: {total_auditor}")
+                    st.write(f"- В финальном результате: {total_plan_calculated}")
         
         return result_df
         
@@ -1992,6 +1966,7 @@ if st.session_state.plan_calculated:
             
         except Exception as e:
             st.error(f"❌ Ошибка при создании полного отчета: {str(e)}")
+
 
 
 
