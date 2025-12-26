@@ -1535,7 +1535,7 @@ if st.session_state.plan_calculated:
             tab_index += 1
         
        # ВКЛАДКА 4: Карта полигонов
-    with results_tabs[3]:
+    with results_tabs[tab_index]:
         st.subheader("🗺️ Карта полигонов аудиторов")
         
         if st.session_state.polygons is not None and len(st.session_state.polygons) > 0:
@@ -1586,4 +1586,5 @@ if st.session_state.plan_calculated:
                     folium_static(m, width=1200, height=600)
         else:
             st.info("Полигоны еще не сгенерированы. Нажмите кнопку 'Рассчитать план'")
+
 
