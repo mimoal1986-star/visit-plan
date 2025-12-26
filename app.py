@@ -1534,7 +1534,7 @@ if st.session_state.plan_calculated:
                         st.metric("Полигонов", total_polygons)
             tab_index += 1
         
-    # ВКЛАДКА 4: Карта полигонов
+       # ВКЛАДКА 4: Карта полигонов
     with results_tabs[3]:
         st.subheader("🗺️ Карта полигонов аудиторов")
         
@@ -1556,4 +1556,192 @@ if st.session_state.plan_calculated:
                     poly_data.append({
                         'Полигон': poly_name,
                         'Аудитор': poly_info.get('auditor', 'Неизвестно'),
-                        'Количество точек': len(poly_info.get
+                        'Количество точек': len(poly_info.get('points', [])),
+                        'Город': poly_info.get('city', 'Неизвестно')
+                    })
+                
+                if poly_data:
+                    st.dataframe(pd.DataFrame(poly_data), use_container_width=True)
+            else:
+                # Код для отображения карты с folium
+                if st.session_state.points_df is not None:
+                    points_df = st.session_state.points_df
+                    
+                    # Находим центр карты
+                    center_lat = points_df['Широта'].mean()
+                    center_lon = points_df['Долгота'].mean()
+                    
+                    m = folium.Map(location=[center_lat, center_lon], zoom_start=10)
+                    
+                    # Цвета для полигонов - разные цвета для разных полигонов
+                    colors = [
+                        '#FF6B6B', '#4ECDC4', '#FFD166', '#06D6A0', '#118AB2',
+                        '#073B4C', '#EF476F', '#7209B7', '#3A86FF', '#FB5607',
+                        '#8338EC', '#FF006E', '#FFBE0B', '#3A86FF', '#1D3557'
+                    ]
+                    
+                    # Создаем словарь цветов для полигонов
+                    polygon_colors = {}
+                    for i, poly_name in enumerate(polygons.keys()):
+                        polygon_colors[poly_name] = colors[i % len(colors)]
+                    
+                    # Сначала отображаем полигоны
+                    for poly_name, poly_info in polygons.items():
+                        coordinates = poly_info.get('coordinates', [])
+                        
+                        if coordinates and len(coordinates) > 2:  # Полигону нужно минимум 3 точки
+                            # Цвет полигона
+                            polygon_color = polygon_colors[poly_name]
+                            
+                            # Более светлый цвет для заливки полигона
+                            import colorsys
+                            # Конвертируем hex в RGB, делаем светлее, конвертируем обратно в hex
+                            def lighten_color(hex_color, factor=0.3):
+                                hex_color = hex_color.lstrip('#')
+                                r = int(hex_color[0:2], 16)
+                                g = int(hex_color[2:4], 16)
+                                b = int(hex_color[4:6], 16)
+                                
+                                # Делаем цвет светлее
+                                h, l, s = colorsys.rgb_to_hls(r/255, g/255, b/255)
+                                l = min(1.0, l + factor)
+                                r, g, b = colorsys.hls_to_rgb(h, l, s)
+                                
+                                return '#{:02x}{:02x}{:02x}'.format(
+                                    int(r*255), int(g*255), int(b*255)
+                                )
+                            
+                            fill_color = lighten_color(polygon_color, 0.3)
+                            
+                            # Добавляем полигон на карту
+                            folium.Polygon(
+                                locations=coordinates,
+                                popup=f"""
+                                <div style="font-family: Arial, sans-serif;">
+                                    <h4 style="color: {polygon_color};">🗺️ {poly_name}</h4>
+                                    <p><b>Аудитор:</b> {poly_info.get('auditor', 'Неизвестно')}</p>
+                                    <p><b>Город:</b> {poly_info.get('city', 'Неизвестно')}</p>
+                                    <p><b>Точек:</b> {len(poly_info.get('points', []))}</p>
+                                    <p style="color: {polygon_color};">● Цвет полигона</p>
+                                </div>
+                                """,
+                                color=polygon_color,  # Цвет границы
+                                fill=True,
+                                fill_color=fill_color,  # Более светлая заливка
+                                fill_opacity=0.3,  # Полупрозрачная заливка
+                                weight=2
+                            ).add_to(m)
+                    
+                    # Затем отображаем точки
+                    for poly_name, poly_info in polygons.items():
+                        points = poly_info.get('points', [])
+                        polygon_color = polygon_colors[poly_name]
+                        
+                        for point in points:
+                            if isinstance(point, (list, tuple)) and len(point) >= 3:
+                                point_id, lat, lon = point[0], point[1], point[2]
+                                
+                                # Находим информацию о точке
+                                point_info = points_df[points_df['ID_Точки'] == point_id]
+                                if not point_info.empty:
+                                    point_name = point_info['Название_Точки'].iloc[0]
+                                    point_type = point_info['Тип'].iloc[0]
+                                else:
+                                    point_name = str(point_id)
+                                    point_type = "Неизвестно"
+                                
+                                # Точка того же цвета, что и полигон, но более насыщенная
+                                folium.CircleMarker(
+                                    location=[lat, lon],
+                                    radius=6,
+                                    popup=f"""
+                                    <div style="font-family: Arial, sans-serif;">
+                                        <h4 style="color: {polygon_color};">🏪 {point_name}</h4>
+                                        <p><b>Тип:</b> {point_type}</p>
+                                        <p><b>Полигон:</b> {poly_name}</p>
+                                        <p><b>Аудитор:</b> {poly_info.get('auditor', 'Неизвестно')}</p>
+                                        <p style="color: {polygon_color};">● Цвет точки</p>
+                                    </div>
+                                    """,
+                                    tooltip=f"🏪 {point_name} ({poly_name})",
+                                    color=polygon_color,  # Тот же цвет, что и у полигона
+                                    fill=True,
+                                    fill_opacity=0.8,  # Более насыщенный чем полигон
+                                    weight=2
+                                ).add_to(m)
+                    
+                    # Добавляем легенду
+                    from branca.element import Template, MacroElement
+                    
+                    template = """
+                    {% macro html(this, kwargs) %}
+                    <div style="
+                        position: fixed; 
+                        bottom: 50px;
+                        left: 50px;
+                        width: 250px;
+                        height: auto;
+                        background-color: white;
+                        border: 2px solid grey;
+                        z-index: 9999;
+                        font-size: 12px;
+                        padding: 10px;
+                        border-radius: 5px;
+                        box-shadow: 0 0 10px rgba(0,0,0,0.2);
+                        overflow-y: auto;
+                        max-height: 300px;
+                        ">
+                        <p style="font-weight: bold; margin-bottom: 10px; font-size: 14px;">🗺️ Легенда полигонов</p>
+                    """
+                    
+                    for poly_name, poly_info in polygons.items():
+                        polygon_color = polygon_colors[poly_name]
+                        auditor = poly_info.get('auditor', 'Неизвестно')
+                        point_count = len(poly_info.get('points', []))
+                        
+                        template += f"""
+                        <div style="margin: 5px 0; padding: 3px; border-bottom: 1px solid #eee;">
+                            <div style="display: flex; align-items: center;">
+                                <div style="
+                                    width: 15px; 
+                                    height: 15px; 
+                                    background-color: {polygon_color}; 
+                                    margin-right: 8px;
+                                    border-radius: 50%;
+                                    border: 1px solid {polygon_color};
+                                "></div>
+                                <div>
+                                    <div style="font-weight: bold; font-size: 11px;">{poly_name}</div>
+                                    <div style="font-size: 10px; color: #666;">
+                                        {auditor} | {point_count} точек
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        """
+                    
+                    template += """
+                    </div>
+                    {% endmacro %}
+                    """
+                    
+                    macro = MacroElement()
+                    macro._template = Template(template)
+                    m.get_root().add_child(macro)
+                    
+                    # Отображаем карту
+                    folium_static(m, width=1200, height=600)
+                    
+                    # Статистика под картой
+                    col1, col2, col3 = st.columns(3)
+                    with col1:
+                        st.metric("Полигонов", len(polygons))
+                    with col2:
+                        total_points = sum(len(poly_info.get('points', [])) for poly_info in polygons.values())
+                        st.metric("Всего точек", total_points)
+                    with col3:
+                        st.metric("Уникальных цветов", len(set(polygon_colors.values())))
+                else:
+                    st.info("Нет данных о точках для отображения на карте")
+        else:
+            st.info("Полигоны еще не сгенерированы. Нажмите кнопку 'Рассчитать план'")
