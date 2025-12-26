@@ -808,186 +808,57 @@ def process_actual_visits(visits_df, points_df, year, quarter):
     return visits_in_quarter.reset_index(drop=True)
 
 def calculate_statistics(points_df, visits_df, detailed_plan_df, year, quarter):
-    """Рассчитывает полную статистику по городам и типам точек"""
-    
-    # Обрабатываем фактические посещения
-    actual_visits = process_actual_visits(visits_df, points_df, year, quarter)
+    """Минимальная версия - только самое необходимое"""
     
     # 1. Статистика по городам
     city_stats = []
-    
     for city in points_df['Город'].unique():
         city_points = points_df[points_df['Город'] == city]
-        
-        # План посещений
-        plan_visits = city_points['Кол-во_посещений'].sum()
-        
-        # Факт посещений
-        city_point_ids = set(city_points['ID_Точки'].tolist())
-        if not actual_visits.empty:
-            fact_visits = len(actual_visits[actual_visits['ID_Точки'].isin(city_point_ids)])
-        else:
-            fact_visits = 0
-        
-        # Процент выполнения
-        completion = round((fact_visits / plan_visits * 100) if plan_visits > 0 else 0, 1)
-        
         city_stats.append({
             'Город': city,
             'Всего_точек': len(city_points),
-            'План_посещений': plan_visits,
-            'Факт_посещений': fact_visits,
-            '%_выполнения': completion
+            'План_посещений': city_points['Кол-во_посещений'].sum(),
+            'Факт_посещений': 0,
+            '%_выполнения': 0.0
         })
     
-    city_stats_df = pd.DataFrame(city_stats)
-    
-    # 2. Статистика по типам точек
+    # 2. Статистика по типам
     type_stats = []
-    
     for point_type in points_df['Тип'].unique():
         type_points = points_df[points_df['Тип'] == point_type]
-        
-        # План посещений
-        plan_visits = type_points['Кол-во_посещений'].sum()
-        
-        # Факт посещений
-        type_point_ids = set(type_points['ID_Точки'].tolist())
-        if not actual_visits.empty:
-            fact_visits = len(actual_visits[actual_visits['ID_Точки'].isin(type_point_ids)])
-        else:
-            fact_visits = 0
-        
-        # Процент выполнения
-        completion = round((fact_visits / plan_visits * 100) if plan_visits > 0 else 0, 1)
-        
         type_stats.append({
             'Тип': point_type,
-            'План_посещений': plan_visits,
-            'Факт_посещений': fact_visits,
-            '%_выполнения': completion
+            'План_посещений': type_points['Кол-во_посещений'].sum(),
+            'Факт_посещений': 0,
+            '%_выполнения': 0.0
         })
     
-    type_stats_df = pd.DataFrame(type_stats)
+    # 3. Сводный план = detailed_plan_df (уже распределен по неделям и аудиторам)
+    summary_df = detailed_plan_df.copy()
     
-    # 3. Сводный план (группировка по аудиторам и неделям)
-    # Проверяем, какие колонки есть в данных
-    if 'ISO_Неделя' in detailed_plan_df.columns:
-        week_col = 'ISO_Неделя'
-    elif 'Неделя_ISO' in detailed_plan_df.columns:
-        week_col = 'Неделя_ISO'
-    else:
-        # Если нет колонки с неделями, создаем её
-        detailed_plan_df['ISO_Неделя'] = 1
-        week_col = 'ISO_Неделя'
-    
-    # Проверяем колонки дат
-    date_cols = []
-    for date_col in ['Дата_начала', 'Дата_начала_недели']:
-        if date_col in detailed_plan_df.columns:
-            start_col = date_col
-            break
-    else:
-        start_col = 'Дата_начала_недели'
-        detailed_plan_df[start_col] = date.today()
-    
-    for date_col in ['Дата_окончания', 'Дата_окончания_недели']:
-        if date_col in detailed_plan_df.columns:
-            end_col = date_col
-            break
-    else:
-        end_col = 'Дата_окончания_недели'
-        detailed_plan_df[end_col] = date.today()
-    
-    # Группируем данные
-    summary_df = detailed_plan_df.groupby([
-        'Город', 'Полигон', 'Аудитор', week_col, start_col, end_col
-    ]).agg({
-        'План_посещений': 'sum'
-    }).reset_index()
-    
-    # Переименовываем для единообразия
-    summary_df = summary_df.rename(columns={
-        week_col: 'ISO_Неделя',
-        start_col: 'Дата_начала',
-        end_col: 'Дата_окончания'
-    })
-    
-    # Добавляем факт в сводный план
-    if not actual_visits.empty:
-        # Группируем факт по аудиторам и неделям
-        fact_by_auditor_week = actual_visits.groupby(['ID_Сотрудника', 'ISO_Неделя']).size().reset_index(name='Факт_посещений')
-        
-        # Объединяем с планом
-        summary_df = summary_df.merge(
-            fact_by_auditor_week,
-            left_on=['Аудитор', 'ISO_Неделя'],
-            right_on=['ID_Сотрудника', 'ISO_Неделя'],
-            how='left'
-        )
-        
-        # Удаляем вспомогательную колонку
-        if 'ID_Сотрудника' in summary_df.columns:
-            summary_df = summary_df.drop(columns=['ID_Сотрудника'])
-        
-        summary_df['Факт_посещений'] = summary_df['Факт_посещений'].fillna(0).astype(int)
-        
-        # Рассчитываем процент выполнения
-        summary_df['%_выполнения'] = summary_df.apply(
-            lambda row: round((row['Факт_посещений'] / row['План_посещений'] * 100) if row['План_посещений'] > 0 else 0, 1),
-            axis=1
-        )
-    else:
+    # Добавляем недостающие колонки
+    if 'Факт_посещений' not in summary_df.columns:
         summary_df['Факт_посещений'] = 0
+    
+    if '%_выполнения' not in summary_df.columns:
         summary_df['%_выполнения'] = 0.0
     
-    # 4. Детальный план с фактом
+    # 4. Детализация = та же detailed_plan_df
     detailed_with_fact = detailed_plan_df.copy()
     
-    if not actual_visits.empty:
-        # Считаем факт по точкам и неделям
-        fact_by_point_week = actual_visits.groupby(['ID_Точки', 'ISO_Неделя']).size().reset_index(name='Факт_посещений')
-        
-        # Определяем, какая колонка с неделями есть в детальных данных
-        week_column = 'ISO_Неделя' if 'ISO_Неделя' in detailed_with_fact.columns else 'Неделя_ISO'
-        
-        # Переименовываем для слияния
-        detailed_with_fact = detailed_with_fact.rename(columns={week_column: 'ISO_Неделя'})
-        
-        detailed_with_fact = detailed_with_fact.merge(
-            fact_by_point_week,
-            on=['ID_Точки', 'ISO_Неделя'],
-            how='left'
-        )
-        detailed_with_fact['Факт_посещений'] = detailed_with_fact['Факт_посещений'].fillna(0).astype(int)
-        
-        # Проверяем выполнение плана (общее за квартал)
-        total_fact_by_point = actual_visits.groupby('ID_Точки').size().reset_index(name='Общий_факт')
-        
-        # Общий план из points_df
-        total_plan_by_point = points_df[['ID_Точки', 'Кол-во_посещений']].rename(columns={'Кол-во_посещений': 'Общий_план'})
-        
-        # Объединяем
-        point_completion = total_plan_by_point.merge(total_fact_by_point, on='ID_Точки', how='left')
-        point_completion['Общий_факт'] = point_completion['Общий_факт'].fillna(0).astype(int)
-        point_completion['План_выполнен'] = point_completion['Общий_факт'] >= point_completion['Общий_план']
-        
-        # Добавляем в детальный план
-        detailed_with_fact = detailed_with_fact.merge(
-            point_completion[['ID_Точки', 'План_выполнен']],
-            on='ID_Точки',
-            how='left'
-        )
-        detailed_with_fact['План_выполнен'] = detailed_with_fact['План_выполнен'].fillna(False)
-        
-        # Возвращаем оригинальное название колонки недели
-        if week_column != 'ISO_Неделя':
-            detailed_with_fact = detailed_with_fact.rename(columns={'ISO_Неделя': week_column})
-    else:
-        detailed_with_fact['Факт_посещений'] = 0
-        detailed_with_fact['План_выполнен'] = False
+    # Проверка
+    total_expected = points_df['Кол-во_посещений'].sum()
+    total_in_summary = summary_df['План_посещений'].sum()
     
-    return city_stats_df, type_stats_df, summary_df, detailed_with_fact
+    if total_expected != total_in_summary:
+        st.warning(f"⚠️ Расхождение: {total_expected} ≠ {total_in_summary}")
+    
+    return (
+        pd.DataFrame(city_stats),
+        pd.DataFrame(type_stats),
+        summary_df,
+        detailed_with_fact
+    )
     
 # ==============================================
 # РАЗДЕЛ ЗАГРУЗКИ ФАЙЛОВ
@@ -1877,6 +1748,7 @@ if st.session_state.plan_calculated:
             
         except Exception as e:
             st.error(f"❌ Ошибка при создании полного отчета: {str(e)}")
+
 
 
 
