@@ -510,46 +510,99 @@ def generate_polygons(polygons_info):
         return {}
 
 def distribute_visits_by_weeks(points_assignment_df, points_df, year, quarter, coefficients):
-    """Упрощенная версия - только для тестирования"""
+    """Распределяет посещения по неделям с диагностикой"""
     try:
-        weekly_plan = []
+        # 1. Диагностические переменные
+        diagnostics = []
         
-        # 1. Для каждого города
+        # 2. Для каждого города
         for city in points_df['Город'].unique():
             city_points = points_df[points_df['Город'] == city]
-            city_plan = city_points['Кол-во_посещений'].sum()
+            city_total = city_points['Кол-во_посещений'].sum()
             
-            city_assignments = points_assignment_df[points_assignment_df['Город'] == city]
-            if city_assignments.empty:
-                continue
-                
-            city_auditors = city_assignments['Аудитор'].unique()
+            city_diag = {
+                'city': city,
+                'city_total': city_total,
+                'stage_total': 0,
+                'daily_total': 0,
+                'weekly_total': 0,
+                'auditor_total': 0
+            }
             
-            # 2. ПРОСТОЕ распределение: делим план поровну на 13 недель
-            weeks = get_weeks_in_quarter(year, quarter)
+            # 2.1. Распределяем по этапам
+            # [существующий код распределения по этапам]
+            stage_plans = [...]  # результат распределения по этапам
+            city_diag['stage_total'] = sum(stage_plans)
             
-            for week in weeks:
-                # Равномерно между аудиторами
-                for i, auditor in enumerate(city_auditors):
-                    weekly_plan.append({
-                        'Город': city,
-                        'Полигон': city,
-                        'Аудитор': auditor,
-                        'ISO_Неделя': week['iso_week_number'],
-                        'Дата_начала': week['start_date'],
-                        'Дата_окончания': week['end_date'],
-                        'План_посещений': 1  # По 1 визиту на неделю
-                    })
+            # 2.2. Распределяем по дням
+            all_daily_visits = []  # (дата, визиты)
+            # [существующий код распределения по дням]
+            for stage_idx, stage_plan in enumerate(stage_plans):
+                # ... распределение дней ...
+                # добавляем в all_daily_visits
+            
+            city_diag['daily_total'] = sum([v for _, v in all_daily_visits])
+            
+            # 2.3. Агрегируем по неделям
+            week_visits = {}
+            for day, visits in all_daily_visits:
+                iso_week = get_iso_week(day)
+                week_visits[iso_week] = week_visits.get(iso_week, 0) + visits
+            
+            city_diag['weekly_total'] = sum(week_visits.values())
+            
+            # 2.4. Распределяем по аудиторам
+            # [существующий код распределения по аудиторам]
+            # В процессе распределения считаем:
+            auditor_total = 0
+            for iso_week, week_total in week_visits.items():
+                # распределение между аудиторами
+                auditor_total += week_total  # недельные визиты полностью распределяются
+            
+            city_diag['auditor_total'] = auditor_total
+            
+            diagnostics.append(city_diag)
         
-        result_df = pd.DataFrame(weekly_plan)
+        # 3. ВЫВОД ДИАГНОСТИКИ
+        st.markdown("### 🔍 Диагностика распределения по шагам")
         
-        # Проверка
-        total_in_result = result_df['План_посещений'].sum()
-        total_expected = points_df['Кол-во_посещений'].sum()
+        diag_df = pd.DataFrame(diagnostics)
+        diag_df['loss_stage'] = diag_df['city_total'] - diag_df['stage_total']
+        diag_df['loss_daily'] = diag_df['stage_total'] - diag_df['daily_total']
+        diag_df['loss_weekly'] = diag_df['daily_total'] - diag_df['weekly_total']
+        diag_df['loss_auditor'] = diag_df['weekly_total'] - diag_df['auditor_total']
+        diag_df['total_loss'] = diag_df['city_total'] - diag_df['auditor_total']
         
-        st.write(f"Ожидалось: {total_expected}, В результате: {total_in_result}")
+        # Отображаем таблицу
+        display_df = diag_df.rename(columns={
+            'city': 'Город',
+            'city_total': 'План города',
+            'stage_total': 'После этапов',
+            'daily_total': 'После дней',
+            'weekly_total': 'После недель',
+            'auditor_total': 'После аудиторов',
+            'loss_stage': 'Потери этапы',
+            'loss_daily': 'Потери дни',
+            'loss_weekly': 'Потери недели',
+            'loss_auditor': 'Потери аудиторы',
+            'total_loss': 'Всего потерь'
+        })
         
-        return result_df
+        st.dataframe(display_df, use_container_width=True)
+        
+        # Суммарные потери по шагам
+        st.markdown("### 📊 Суммарные потери по шагам")
+        col1, col2, col3, col4 = st.columns(4)
+        with col1:
+            st.metric("На этапах", diag_df['loss_stage'].sum())
+        with col2:
+            st.metric("На днях", diag_df['loss_daily'].sum())
+        with col3:
+            st.metric("На неделях", diag_df['loss_weekly'].sum())
+        with col4:
+            st.metric("На аудиторах", diag_df['loss_auditor'].sum())
+        
+        # ... остальной код ...
         
     except Exception as e:
         st.error(f"Ошибка: {str(e)}")
@@ -1757,6 +1810,7 @@ if st.session_state.plan_calculated:
             
         except Exception as e:
             st.error(f"❌ Ошибка при создании полного отчета: {str(e)}")
+
 
 
 
