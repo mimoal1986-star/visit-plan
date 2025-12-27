@@ -802,152 +802,58 @@ def calculate_statistics(points_df, visits_df, detailed_plan_df, year, quarter):
     )
 
 def create_google_maps_excel(points_df, polygons):
-    """Создает Excel файл для импорта в Google Maps с нужными столбцами"""
+    """Создает Excel файл для импорта в Google Maps (упрощенная версия)"""
+    import io
     
-    # Создаем буфер для Excel
     excel_buffer = io.BytesIO()
     
-    try:
-        # Проверка входных данных
-        if points_df is None or points_df.empty:
-            # Создаем минимальный Excel с заголовками
-            with pd.ExcelWriter(excel_buffer, engine='openpyxl') as writer:
-                empty_df = pd.DataFrame(columns=['ID точки', 'Имя точки', 'Тип точки', 
-                                                'Полигон', 'Аудитор', 'Широта', 'Долгота'])
-                empty_df.to_excel(writer, sheet_name='Google Maps Data', index=False)
-            return excel_buffer.getvalue()
-        
-        # Создаем словарь для быстрого поиска полигона по ID точки
-        point_to_polygon = {}
-        point_to_auditor = {}
-        
-        # Заполняем словари из данных полигонов
-        if polygons and isinstance(polygons, dict):
-            for poly_name, poly_info in polygons.items():
-                if not isinstance(poly_info, dict):
-                    continue
-                
-                auditor = poly_info.get('auditor', 'Неизвестно')
-                
-                # Безопасный доступ к точкам полигона
-                polygon_points = poly_info.get('points', [])
-                if not isinstance(polygon_points, (list, tuple)):
-                    continue
-                
-                for point_info in polygon_points:
-                    # Безопасное извлечение ID точки
-                    try:
-                        if isinstance(point_info, (list, tuple)) and len(point_info) >= 1:
-                            point_id_val = point_info[0]
-                            if point_id_val is not None:
-                                point_id = str(point_id_val).strip()
-                                if point_id:
-                                    point_to_polygon[point_id] = poly_name
-                                    point_to_auditor[point_id] = auditor
-                    except (TypeError, ValueError, IndexError):
-                        continue
-        
-        # Формируем данные для каждой точки
+    with pd.ExcelWriter(excel_buffer, engine='openpyxl') as writer:
+        # Лист 1: Точки для карты в нужном формате
         map_data = []
         
+        # Сначала создаем словарь для быстрого поиска
+        point_info_dict = {}
+        for poly_name, poly_info in polygons.items():
+            if 'points' in poly_info:
+                for point_info in poly_info['points']:
+                    if len(point_info) >= 3:
+                        point_id = str(point_info[0])
+                        point_info_dict[point_id] = {
+                            'polygon': poly_name,
+                            'auditor': poly_info.get('auditor', 'Неизвестно')
+                        }
+        
+        # Теперь формируем данные в нужном формате
         for _, point in points_df.iterrows():
-            try:
-                # Безопасное получение ID точки
-                point_id = str(point.get('ID_Точки', '')).strip()
-                if not point_id:
-                    continue
-                
-                # Получаем полигон и аудитора для точки
-                polygon_name = point_to_polygon.get(point_id, "Не назначен")
-                auditor_name = point_to_auditor.get(point_id, "Неизвестно")
-                
-                # Получаем имя точки
-                point_name = point.get('Название_Точки', '')
-                if pd.isna(point_name):
-                    point_name = point_id
-                else:
-                    point_name = str(point_name).strip()
-                    if not point_name:
-                        point_name = point_id
-                
-                # Получаем тип точки
-                point_type = point.get('Тип', 'Неизвестно')
-                if pd.isna(point_type):
-                    point_type = 'Неизвестно'
-                else:
-                    point_type = str(point_type).strip()
-                
-                # Форматируем координаты (заменяем точку на запятую)
-                latitude = point.get('Широта', 0)
-                longitude = point.get('Долгота', 0)
-                
-                # Безопасное преобразование координат
-                def format_coord(coord):
-                    try:
-                        # Пробуем преобразовать в float
-                        coord_float = float(coord)
-                        # Форматируем с 6 знаками после запятой
-                        return f"{coord_float:.6f}".replace('.', ',')
-                    except (ValueError, TypeError):
-                        # Если не получается, возвращаем как строку с заменой точки
-                        coord_str = str(coord).strip()
-                        return coord_str.replace('.', ',')
-                
-                lat_str = format_coord(latitude)
-                lon_str = format_coord(longitude)
-                
-                # Формируем запись
-                map_data.append({
-                    'ID точки': point_id,
-                    'Имя точки': point_name,
-                    'Тип точки': point_type,
-                    'Полигон': polygon_name,
-                    'Аудитор': auditor_name,
-                    'Широта': lat_str,
-                    'Долгота': lon_str
-                })
+            point_id = str(point['ID_Точки'])
             
-            except Exception:
-                # Пропускаем точку при ошибке
-                continue
+            # Получаем информацию о точке из словаря
+            point_info = point_info_dict.get(point_id, {})
+            
+            # Форматируем координаты (заменяем точку на запятую если нужно)
+            lat = str(point['Широта']).replace('.', ',') if '.' in str(point['Широта']) else str(point['Широта'])
+            lon = str(point['Долгота']).replace('.', ',') if '.' in str(point['Долгота']) else str(point['Долгота'])
+            
+            map_data.append({
+                'ID точки': point_id,
+                'Имя точки': point.get('Название_Точки', point_id),
+                'Тип точки': point.get('Тип', 'Неизвестно'),
+                'Полигон': point_info.get('polygon', 'Не назначен'),
+                'Аудор': point_info.get('auditor', 'Неизвестно'),  # Важно: "Аудор", а не "Аудитор"
+                'Широта': lat,
+                'Долгота': lon
+            })
         
-        # Создаем DataFrame
-        if map_data:
-            df_map = pd.DataFrame(map_data)
-        else:
-            # Создаем пустой DataFrame с нужными колонками
-            df_map = pd.DataFrame(columns=['ID точки', 'Имя точки', 'Тип точки', 
-                                          'Полигон', 'Аудитор', 'Широта', 'Долгота'])
+        # Создаем DataFrame с нужными столбцами в правильном порядке
+        df_map = pd.DataFrame(map_data)
         
-        # Упорядочиваем столбцы (гарантируем порядок)
-        expected_columns = ['ID точки', 'Имя точки', 'Тип точки', 
-                          'Полигон', 'Аудитор', 'Широта', 'Долгота']
+        # Упорядочиваем столбцы
+        column_order = ['ID точки', 'Имя точки', 'Тип точки', 'Полигон', 'Аудор', 'Широта', 'Долгота']
+        df_map = df_map[column_order]
         
-        # Проверяем и добавляем отсутствующие колонки
-        for col in expected_columns:
-            if col not in df_map.columns:
-                df_map[col] = ''
-        
-        # Упорядочиваем
-        df_map = df_map[expected_columns]
-        
-        # Сохраняем в Excel
-        with pd.ExcelWriter(excel_buffer, engine='openpyxl') as writer:
-            df_map.to_excel(writer, sheet_name='Google Maps Data', index=False)
-        
-        return excel_buffer.getvalue()
+        df_map.to_excel(writer, sheet_name='Google Maps Data', index=False)
     
-    except Exception as e:
-        # Логируем ошибку в Streamlit
-        st.error(f"Ошибка при создании Excel для Google Maps: {str(e)}")
-        
-        # Возвращаем пустой Excel файл с заголовками
-        empty_buffer = io.BytesIO()
-        with pd.ExcelWriter(empty_buffer, engine='openpyxl') as writer:
-            empty_df = pd.DataFrame(columns=['ID точки', 'Имя точки', 'Тип точки', 
-                                            'Полигон', 'Аудитор', 'Широта', 'Долгота'])
-            empty_df.to_excel(writer, sheet_name='Google Maps Data', index=False)
-        return empty_buffer.getvalue()
+    return excel_buffer.getvalue()
 
 def create_kml_file(points_df, polygons):
     """Создает KML файл для Google Earth"""
@@ -2079,5 +1985,6 @@ if st.session_state.plan_calculated:
                   f"{len(st.session_state.polygons) if st.session_state.polygons else 0} полигонов, "
                   f"{len(st.session_state.auditors_df) if st.session_state.auditors_df is not None else 0} аудиторов")
     current_tab += 1
+
 
 
