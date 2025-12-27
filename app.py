@@ -817,29 +817,39 @@ def create_google_maps_excel(points_df, polygons):
             if 'points' in poly_info:
                 for point_info in poly_info['points']:
                     if len(point_info) >= 3:
-                        point_id = str(point_info[0])
-                        point_info_dict[point_id] = {
-                            'polygon': poly_name,
-                            'auditor': poly_info.get('auditor', 'Неизвестно')
-                        }
+                        # Берем ID точки и нормализуем в строку
+                        point_id = point_info[0]
+                        # Преобразуем в строку и убираем пробелы
+                        if point_id is not None:
+                            point_id_str = str(point_id).strip()
+                            point_info_dict[point_id_str] = {
+                                'polygon': poly_name,
+                                'auditor': poly_info.get('auditor', 'Неизвестно')
+                            }
         
         # Теперь формируем данные в нужном формате
         for _, point in points_df.iterrows():
-            point_id = str(point['ID_Точки'])
+            # Получаем ID точки из DataFrame и нормализуем
+            point_id_raw = point['ID_Точки']
+            point_id_str = str(point_id_raw).strip() if point_id_raw is not None else ''
             
             # Получаем информацию о точке из словаря
-            point_info = point_info_dict.get(point_id, {})
+            point_info = point_info_dict.get(point_id_str, {})
             
             # Форматируем координаты (заменяем точку на запятую если нужно)
-            lat = str(point['Широта']).replace('.', ',') if '.' in str(point['Широта']) else str(point['Широта'])
-            lon = str(point['Долгота']).replace('.', ',') if '.' in str(point['Долгота']) else str(point['Долгота'])
+            lat_raw = point['Широта']
+            lon_raw = point['Долгота']
+            
+            # Преобразуем координаты
+            lat = str(lat_raw).replace('.', ',') if '.' in str(lat_raw) else str(lat_raw)
+            lon = str(lon_raw).replace('.', ',') if '.' in str(lon_raw) else str(lon_raw)
             
             map_data.append({
-                'ID точки': point_id,
-                'Имя точки': point.get('Название_Точки', point_id),
+                'ID точки': point_id_str,
+                'Имя точки': point.get('Название_Точки', point_id_str),
                 'Тип точки': point.get('Тип', 'Неизвестно'),
                 'Полигон': point_info.get('polygon', 'Не назначен'),
-                'Аудор': point_info.get('auditor', 'Неизвестно'),  # Важно: "Аудор", а не "Аудитор"
+                'Аудор': point_info.get('auditor', 'Неизвестно'),
                 'Широта': lat,
                 'Долгота': lon
             })
@@ -1985,6 +1995,7 @@ if st.session_state.plan_calculated:
                   f"{len(st.session_state.polygons) if st.session_state.polygons else 0} полигонов, "
                   f"{len(st.session_state.auditors_df) if st.session_state.auditors_df is not None else 0} аудиторов")
     current_tab += 1
+
 
 
 
