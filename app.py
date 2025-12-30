@@ -813,30 +813,56 @@ def create_google_maps_excel(points_df, polygons):
         
         # Сначала создаем словарь для быстрого поиска
         point_info_dict = {}
+        
+        # ДЕБАГ: посмотрим структуру polygons
+        print(f"Всего полигонов: {len(polygons)}")
+        
         for poly_name, poly_info in polygons.items():
+            auditor = poly_info.get('auditor', 'Неизвестно')
+            print(f"Полигон: {poly_name}, Аудитор: {auditor}")
+            
             if 'points' in poly_info:
-                for point_info in poly_info['points']:
+                points_list = poly_info['points']
+                print(f"  Количество точек в полигоне: {len(points_list)}")
+                
+                # Покажем первые 3 точки
+                for i, point_info in enumerate(points_list[:3]):
+                    print(f"  Точка {i}: {point_info}")
+                
+                for point_info in points_list:
                     if len(point_info) >= 3:
-                        # Берем ID точки и нормализуем в строку
+                        # Берем ID точки
                         point_id = point_info[0]
-                        # Преобразуем в строку и убираем пробелы
                         if point_id is not None:
+                            # Преобразуем в строку и очищаем
                             point_id_str = str(point_id).strip()
                             point_info_dict[point_id_str] = {
                                 'polygon': poly_name,
-                                'auditor': poly_info.get('auditor', 'Неизвестно')
+                                'auditor': auditor
                             }
         
+        # ДЕБАГ: сколько ID сохранено в словаре
+        print(f"Всего ID в словаре: {len(point_info_dict)}")
+        print(f"Примеры ID: {list(point_info_dict.keys())[:5]}")
+        
         # Теперь формируем данные в нужном формате
-        for _, point in points_df.iterrows():
-            # Получаем ID точки из DataFrame и нормализуем
+        unmatched_count = 0
+        
+        for idx, point in points_df.iterrows():
+            # Получаем ID точки из DataFrame
             point_id_raw = point['ID_Точки']
             point_id_str = str(point_id_raw).strip() if point_id_raw is not None else ''
             
             # Получаем информацию о точке из словаря
             point_info = point_info_dict.get(point_id_str, {})
             
-            # Форматируем координаты (заменяем точку на запятую если нужно)
+            # ДЕБАГ: если не нашли
+            if not point_info and point_id_str:
+                unmatched_count += 1
+                if unmatched_count <= 3:  # Покажем только первые 3
+                    print(f"Не найден полигон для ID: {point_id_str}")
+            
+            # Форматируем координаты
             lat_raw = point['Широта']
             lon_raw = point['Долгота']
             
@@ -849,16 +875,19 @@ def create_google_maps_excel(points_df, polygons):
                 'Имя точки': point.get('Название_Точки', point_id_str),
                 'Тип точки': point.get('Тип', 'Неизвестно'),
                 'Полигон': point_info.get('polygon', 'Не назначен'),
-                'Аудор': point_info.get('auditor', 'Неизвестно'),
+                'Аудитор': point_info.get('auditor', 'Неизвестно'),  # ИСПРАВЛЕНО: Аудитор вместо Аудор
                 'Широта': lat,
                 'Долгота': lon
             })
+        
+        # ДЕБАГ: статистика
+        print(f"Всего точек: {len(points_df)}, Не найдено полигонов: {unmatched_count}")
         
         # Создаем DataFrame с нужными столбцами в правильном порядке
         df_map = pd.DataFrame(map_data)
         
         # Упорядочиваем столбцы
-        column_order = ['ID точки', 'Имя точки', 'Тип точки', 'Полигон', 'Аудор', 'Широта', 'Долгота']
+        column_order = ['ID точки', 'Имя точки', 'Тип точки', 'Полигон', 'Аудитор', 'Широта', 'Долгота']  # ИСПРАВЛЕНО
         df_map = df_map[column_order]
         
         df_map.to_excel(writer, sheet_name='Google Maps Data', index=False)
@@ -1995,6 +2024,7 @@ if st.session_state.plan_calculated:
                   f"{len(st.session_state.polygons) if st.session_state.polygons else 0} полигонов, "
                   f"{len(st.session_state.auditors_df) if st.session_state.auditors_df is not None else 0} аудиторов")
     current_tab += 1
+
 
 
 
