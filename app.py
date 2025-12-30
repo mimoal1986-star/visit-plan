@@ -802,21 +802,18 @@ def calculate_statistics(points_df, visits_df, detailed_plan_df, year, quarter):
     )
 
 def create_google_maps_excel(points_df, polygons, points_assignment_df=None):
-    """Создает Excel файл для импорта в Google Maps (исправленная версия)"""
-    # io уже импортирован глобально, не нужно импортировать снова
+    """Создает Excel файл для импорта в Google Maps (с точкой как разделителем)"""
     
     excel_buffer = io.BytesIO()
     
-    # Создаем словарь для сопоставления точек с полигонами и аудиторами
+    # Создаем словарь для сопоставления точек
     point_to_polygon = {}
     point_to_auditor = {}
     
-    # 1. Сначала используем points_assignment_df если он есть
+    # 1. Используем points_assignment_df
     if points_assignment_df is not None and not points_assignment_df.empty:
-        # Более безопасная обработка
         for idx, row in points_assignment_df.iterrows():
             try:
-                # Нормализуем ID точки
                 point_id = str(row['ID_Точки']).strip()
                 if point_id:
                     point_to_polygon[point_id] = row.get('Полигон', 'Не назначен')
@@ -824,7 +821,7 @@ def create_google_maps_excel(points_df, polygons, points_assignment_df=None):
             except (KeyError, AttributeError):
                 continue
     
-    # 2. Если assignment_df пустой, используем данные из полигонов
+    # 2. Если нет assignment_df, используем полигоны
     if not point_to_polygon and polygons:
         for poly_name, poly_info in polygons.items():
             if 'points' in poly_info and poly_info['points']:
@@ -838,47 +835,60 @@ def create_google_maps_excel(points_df, polygons, points_assignment_df=None):
                         except (IndexError, AttributeError):
                             continue
     
-    # 3. Подготавливаем данные для Excel
+    # 3. Подготавливаем данные
     map_data = []
     
     for idx, point in points_df.iterrows():
         try:
-            # Получаем ID точки и нормализуем
+            # ID точки
             point_id_raw = point.get('ID_Точки', '')
             point_id_str = str(point_id_raw).strip() if point_id_raw is not None else ''
             
-            if not point_id_str:  # Пропускаем точки без ID
+            if not point_id_str:
                 continue
                 
-            # Получаем полигон и аудитора
+            # Полигон и аудитор
             polygon = point_to_polygon.get(point_id_str, 'Не назначен')
             auditor = point_to_auditor.get(point_id_str, 'Неизвестно')
             
-            # Форматируем координаты (заменяем точку на запятую для русского Excel)
+            # ⭐⭐ ВАЖНО: КООРДИНАТЫ С ТОЧКОЙ ДЛЯ GOOGLE MAPS ⭐⭐
             lat_raw = point.get('Широта', 0)
             lon_raw = point.get('Долгота', 0)
             
-            # Преобразуем координаты
+            # Преобразуем координаты с ТОЧКОЙ как десятичным разделителем
             try:
-                lat_float = float(lat_raw)
-                lon_float = float(lon_raw)
-                lat = f"{lat_float:.6f}".replace('.', ',')
-                lon = f"{lon_float:.6f}".replace('.', ',')
+                # Пробуем преобразовать в число
+                if isinstance(lat_raw, str):
+                    lat_clean = lat_raw.replace(',', '.').strip()
+                else:
+                    lat_clean = str(lat_raw).replace(',', '.').strip()
+                    
+                if isinstance(lon_raw, str):
+                    lon_clean = lon_raw.replace(',', '.').strip()
+                else:
+                    lon_clean = str(lon_raw).replace(',', '.').strip()
+                
+                lat_float = float(lat_clean)
+                lon_float = float(lon_clean)
+                
+                # Форматируем с точкой (6 знаков после запятой)
+                lat = f"{lat_float:.6f}"  # ← ТОЧКА как разделитель
+                lon = f"{lon_float:.6f}"  # ← ТОЧКА как разделитель
+                
             except (ValueError, TypeError):
-                lat = str(lat_raw).replace('.', ',') if '.' in str(lat_raw) else str(lat_raw)
-                lon = str(lon_raw).replace('.', ',') if '.' in str(lon_raw) else str(lon_raw)
+                # Если не получается, оставляем как есть (но заменяем запятую)
+                lat = str(lat_raw).replace(',', '.').strip()
+                lon = str(lon_raw).replace(',', '.').strip()
             
-            # Название точки
+            # Название и тип точки
             point_name = point.get('Название_Точки', point_id_str)
             if pd.isna(point_name):
                 point_name = point_id_str
             
-            # Тип точки
             point_type = point.get('Тип', 'Неизвестно')
             if pd.isna(point_type):
                 point_type = 'Неизвестно'
             
-            # Добавляем в данные
             map_data.append({
                 'ID точки': point_id_str,
                 'Имя точки': str(point_name),
@@ -889,20 +899,15 @@ def create_google_maps_excel(points_df, polygons, points_assignment_df=None):
                 'Долгота': lon
             })
         except Exception as e:
-            # Пропускаем точку с ошибкой
             continue
     
     # Создаем DataFrame
     if map_data:
         df_map = pd.DataFrame(map_data)
-        
-        # Упорядочиваем столбцы
         column_order = ['ID точки', 'Имя точки', 'Тип точки', 'Полигон', 'Аудор', 'Широта', 'Долгота']
-        # Используем только существующие колонки
         column_order = [col for col in column_order if col in df_map.columns]
         df_map = df_map[column_order]
     else:
-        # Создаем пустой DataFrame с нужными колонками
         df_map = pd.DataFrame(columns=column_order)
     
     # Сохраняем в Excel
@@ -2047,6 +2052,7 @@ if st.session_state.plan_calculated:
                   f"{len(st.session_state.polygons) if st.session_state.polygons else 0} полигонов, "
                   f"{len(st.session_state.auditors_df) if st.session_state.auditors_df is not None else 0} аудиторов")
     current_tab += 1
+
 
 
 
