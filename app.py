@@ -801,95 +801,112 @@ def calculate_statistics(points_df, visits_df, detailed_plan_df, year, quarter):
         detailed_with_fact
     )
 
-def create_google_maps_excel(points_df, polygons):
-    """Создает Excel файл для импорта в Google Maps (упрощенная версия)"""
-    import io
+def create_google_maps_excel(points_df, polygons, points_assignment_df=None):
+    """Создает Excel файл для импорта в Google Maps (исправленная версия)"""
+    # io уже импортирован глобально, не нужно импортировать снова
     
     excel_buffer = io.BytesIO()
     
-    with pd.ExcelWriter(excel_buffer, engine='openpyxl') as writer:
-        # Лист 1: Точки для карты в нужном формате
-        map_data = []
-        
-        # Сначала создаем словарь для быстрого поиска
-        point_info_dict = {}
-        
-        # ДЕБАГ: посмотрим структуру polygons
-        print(f"Всего полигонов: {len(polygons)}")
-        
+    # Создаем словарь для сопоставления точек с полигонами и аудиторами
+    point_to_polygon = {}
+    point_to_auditor = {}
+    
+    # 1. Сначала используем points_assignment_df если он есть
+    if points_assignment_df is not None and not points_assignment_df.empty:
+        # Более безопасная обработка
+        for idx, row in points_assignment_df.iterrows():
+            try:
+                # Нормализуем ID точки
+                point_id = str(row['ID_Точки']).strip()
+                if point_id:
+                    point_to_polygon[point_id] = row.get('Полигон', 'Не назначен')
+                    point_to_auditor[point_id] = row.get('Аудитор', 'Неизвестно')
+            except (KeyError, AttributeError):
+                continue
+    
+    # 2. Если assignment_df пустой, используем данные из полигонов
+    if not point_to_polygon and polygons:
         for poly_name, poly_info in polygons.items():
-            auditor = poly_info.get('auditor', 'Неизвестно')
-            print(f"Полигон: {poly_name}, Аудитор: {auditor}")
-            
-            if 'points' in poly_info:
-                points_list = poly_info['points']
-                print(f"  Количество точек в полигоне: {len(points_list)}")
-                
-                # Покажем первые 3 точки
-                for i, point_info in enumerate(points_list[:3]):
-                    print(f"  Точка {i}: {point_info}")
-                
-                for point_info in points_list:
-                    if len(point_info) >= 3:
-                        # Берем ID точки
-                        point_id = point_info[0]
-                        if point_id is not None:
-                            # Преобразуем в строку и очищаем
-                            point_id_str = str(point_id).strip()
-                            point_info_dict[point_id_str] = {
-                                'polygon': poly_name,
-                                'auditor': auditor
-                            }
-        
-        # ДЕБАГ: сколько ID сохранено в словаре
-        print(f"Всего ID в словаре: {len(point_info_dict)}")
-        print(f"Примеры ID: {list(point_info_dict.keys())[:5]}")
-        
-        # Теперь формируем данные в нужном формате
-        unmatched_count = 0
-        
-        for idx, point in points_df.iterrows():
-            # Получаем ID точки из DataFrame
-            point_id_raw = point['ID_Точки']
+            if 'points' in poly_info and poly_info['points']:
+                for point_info in poly_info['points']:
+                    if point_info and len(point_info) >= 3:
+                        try:
+                            point_id = str(point_info[0]).strip() if point_info[0] is not None else ''
+                            if point_id:
+                                point_to_polygon[point_id] = poly_name
+                                point_to_auditor[point_id] = poly_info.get('auditor', 'Неизвестно')
+                        except (IndexError, AttributeError):
+                            continue
+    
+    # 3. Подготавливаем данные для Excel
+    map_data = []
+    
+    for idx, point in points_df.iterrows():
+        try:
+            # Получаем ID точки и нормализуем
+            point_id_raw = point.get('ID_Точки', '')
             point_id_str = str(point_id_raw).strip() if point_id_raw is not None else ''
             
-            # Получаем информацию о точке из словаря
-            point_info = point_info_dict.get(point_id_str, {})
+            if not point_id_str:  # Пропускаем точки без ID
+                continue
+                
+            # Получаем полигон и аудитора
+            polygon = point_to_polygon.get(point_id_str, 'Не назначен')
+            auditor = point_to_auditor.get(point_id_str, 'Неизвестно')
             
-            # ДЕБАГ: если не нашли
-            if not point_info and point_id_str:
-                unmatched_count += 1
-                if unmatched_count <= 3:  # Покажем только первые 3
-                    print(f"Не найден полигон для ID: {point_id_str}")
-            
-            # Форматируем координаты
-            lat_raw = point['Широта']
-            lon_raw = point['Долгота']
+            # Форматируем координаты (заменяем точку на запятую для русского Excel)
+            lat_raw = point.get('Широта', 0)
+            lon_raw = point.get('Долгота', 0)
             
             # Преобразуем координаты
-            lat = str(lat_raw).replace('.', ',') if '.' in str(lat_raw) else str(lat_raw)
-            lon = str(lon_raw).replace('.', ',') if '.' in str(lon_raw) else str(lon_raw)
+            try:
+                lat_float = float(lat_raw)
+                lon_float = float(lon_raw)
+                lat = f"{lat_float:.6f}".replace('.', ',')
+                lon = f"{lon_float:.6f}".replace('.', ',')
+            except (ValueError, TypeError):
+                lat = str(lat_raw).replace('.', ',') if '.' in str(lat_raw) else str(lat_raw)
+                lon = str(lon_raw).replace('.', ',') if '.' in str(lon_raw) else str(lon_raw)
             
+            # Название точки
+            point_name = point.get('Название_Точки', point_id_str)
+            if pd.isna(point_name):
+                point_name = point_id_str
+            
+            # Тип точки
+            point_type = point.get('Тип', 'Неизвестно')
+            if pd.isna(point_type):
+                point_type = 'Неизвестно'
+            
+            # Добавляем в данные
             map_data.append({
                 'ID точки': point_id_str,
-                'Имя точки': point.get('Название_Точки', point_id_str),
-                'Тип точки': point.get('Тип', 'Неизвестно'),
-                'Полигон': point_info.get('polygon', 'Не назначен'),
-                'Аудитор': point_info.get('auditor', 'Неизвестно'),  # ИСПРАВЛЕНО: Аудитор вместо Аудор
+                'Имя точки': str(point_name),
+                'Тип точки': str(point_type),
+                'Полигон': str(polygon),
+                'Аудор': str(auditor),
                 'Широта': lat,
                 'Долгота': lon
             })
-        
-        # ДЕБАГ: статистика
-        print(f"Всего точек: {len(points_df)}, Не найдено полигонов: {unmatched_count}")
-        
-        # Создаем DataFrame с нужными столбцами в правильном порядке
+        except Exception as e:
+            # Пропускаем точку с ошибкой
+            continue
+    
+    # Создаем DataFrame
+    if map_data:
         df_map = pd.DataFrame(map_data)
         
         # Упорядочиваем столбцы
-        column_order = ['ID точки', 'Имя точки', 'Тип точки', 'Полигон', 'Аудитор', 'Широта', 'Долгота']  # ИСПРАВЛЕНО
+        column_order = ['ID точки', 'Имя точки', 'Тип точки', 'Полигон', 'Аудор', 'Широта', 'Долгота']
+        # Используем только существующие колонки
+        column_order = [col for col in column_order if col in df_map.columns]
         df_map = df_map[column_order]
-        
+    else:
+        # Создаем пустой DataFrame с нужными колонками
+        df_map = pd.DataFrame(columns=column_order)
+    
+    # Сохраняем в Excel
+    with pd.ExcelWriter(excel_buffer, engine='openpyxl') as writer:
         df_map.to_excel(writer, sheet_name='Google Maps Data', index=False)
     
     return excel_buffer.getvalue()
@@ -1347,11 +1364,16 @@ if calculate_button:
                 st.error("❌ Не удалось распределить точки по аудиторам")
                 st.stop()
             
+            # ✅ СОХРАНЯЕМ ДАННЫЕ ДЛЯ ВЫГРУЗКИ
+            st.session_state.points_assignment_df = points_assignment_df  # ДЛЯ GOOGLE MAPS
+            st.session_state.polygons_info = polygons_info  # ДЛЯ ПОЛИГОНОВ
+            
             # Генерируем полигоны
             polygons = generate_polygons(polygons_info)
             st.session_state.polygons = polygons
             
             st.success(f"✅ Точки распределены по {len(polygons_info)} полигонам")
+            st.success(f"✅ Сохранено {len(points_assignment_df)} назначений точек")
         
         with st.spinner("🔄 Распределение посещений по неделям..."):
             # Распределяем посещения по неделям
@@ -1848,7 +1870,8 @@ if st.session_state.plan_calculated:
                                         else:
                                             excel_buffer = create_google_maps_excel(
                                                 st.session_state.points_df,
-                                                st.session_state.polygons
+                                                st.session_state.polygons,
+                                                st.session_state.get('points_assignment_df')  # Передаем assignment_df
                                             )
                                             
                                             # Сразу показываем кнопку скачивания
@@ -2024,6 +2047,7 @@ if st.session_state.plan_calculated:
                   f"{len(st.session_state.polygons) if st.session_state.polygons else 0} полигонов, "
                   f"{len(st.session_state.auditors_df) if st.session_state.auditors_df is not None else 0} аудиторов")
     current_tab += 1
+
 
 
 
