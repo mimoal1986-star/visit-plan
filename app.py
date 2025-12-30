@@ -857,7 +857,6 @@ def create_google_maps_excel(points_df, polygons, points_assignment_df=None):
                 city = 'Неизвестно'
             
             # Определяем ключ для группировки
-            # Сначала проверяем город, потом полигон
             group_key = city
             
             # Координаты
@@ -915,12 +914,18 @@ def create_google_maps_excel(points_df, polygons, points_assignment_df=None):
     # 4. Проверяем общее количество строк
     total_rows = sum(len(points) for points in grouped_data.values())
     
-    # Если строк меньше 2000 или групп мало - создаем простой файл
-    if total_rows <= 2000 or len(grouped_data) <= 1:
-        with pd.ExcelWriter(excel_buffer, engine='openpyxl') as writer:
-            # Объединяем все данные в одну вкладку
+    # Храним информацию о вкладках для сводки
+    sheet_info = []
+    
+    # 5. Создаем Excel файл
+    with pd.ExcelWriter(excel_buffer, engine='openpyxl') as writer:
+        sheet_counter = 0
+        
+        # Если строк меньше 2000 - создаем одну вкладку
+        if total_rows <= 2000:
+            # Объединяем все данные
             all_data = []
-            for points in grouped_data.values():
+            for city, points in grouped_data.items():
                 all_data.extend(points)
             
             if all_data:
@@ -928,24 +933,20 @@ def create_google_maps_excel(points_df, polygons, points_assignment_df=None):
                 column_order = ['ID точки', 'Имя точки', 'Тип точки', 'Город', 'Полигон', 'Аудитор', 'Широта', 'Долгота']
                 column_order = [col for col in column_order if col in df_all.columns]
                 df_all = df_all[column_order]
-                df_all.to_excel(writer, sheet_name='Все точки', index=False)
                 
-                # Добавляем сводную информацию
-                summary = pd.DataFrame([{
+                sheet_name = 'Все точки'
+                df_all.to_excel(writer, sheet_name=sheet_name, index=False)
+                
+                sheet_info.append({
+                    'Вкладка': sheet_name,
                     'Количество точек': len(df_all),
-                    'Количество городов': df_all['Город'].nunique(),
-                    'Количество полигонов': df_all['Полигон'].nunique(),
-                    'Количество аудиторов': df_all['Аудитор'].nunique()
-                }])
-                summary.to_excel(writer, sheet_name='Сводка', index=False)
-    
-    else:
-        # Если много строк - разбиваем на вкладки
-        with pd.ExcelWriter(excel_buffer, engine='openpyxl') as writer:
-            sheet_counter = 0
-            processed_points = 0
-            
-            # Сначала группируем по городам
+                    'Город': 'Все',
+                    'Полигон': 'Все',
+                    'Аудиторов': df_all['Аудитор'].nunique()
+                })
+        
+        else:
+            # Разбиваем на вкладки
             for city, city_points in grouped_data.items():
                 if len(city_points) <= 2000:
                     # Весь город помещается на одну вкладку
@@ -954,20 +955,38 @@ def create_google_maps_excel(points_df, polygons, points_assignment_df=None):
                     column_order = [col for col in column_order if col in df_city.columns]
                     df_city = df_city[column_order]
                     
-                    # Ограничиваем имя вкладки 31 символом (ограничение Excel)
-                    sheet_name = f"{city[:28]}" if len(city) > 28 else city
-                    if sheet_name in writer.sheets:
-                        sheet_name = f"{city[:26]}_{sheet_counter}"
+                    # Формируем имя вкладки
+                    sheet_name = city[:31]  # Ограничение Excel
+                    
+                    # Заменяем запрещенные символы
+                    invalid_chars = ['/', '\\', '?', '*', ':', '[', ']']
+                    for char in invalid_chars:
+                        sheet_name = sheet_name.replace(char, '_')
+                    
+                    # Проверяем уникальность имени
+                    original_name = sheet_name
+                    counter = 1
+                    while sheet_name in writer.sheets:
+                        sheet_name = f"{original_name[:28]}_{counter}"
+                        counter += 1
                     
                     df_city.to_excel(writer, sheet_name=sheet_name, index=False)
+                    
+                    sheet_info.append({
+                        'Вкладка': sheet_name,
+                        'Количество точек': len(df_city),
+                        'Город': city,
+                        'Полигон': 'Весь город',
+                        'Аудиторов': df_city['Аудитор'].nunique()
+                    })
+                    
                     sheet_counter += 1
-                    processed_points += len(city_points)
                 else:
                     # Город нужно разбить по полигонам
                     city_points_df = pd.DataFrame(city_points)
                     
                     # Группируем по полигонам внутри города
-                    for polygon in city_points_df['Полигон'].unique():
+                    for polygon in sorted(city_points_df['Полигон'].unique()):
                         polygon_points = city_points_df[city_points_df['Полигон'] == polygon].copy()
                         
                         if len(polygon_points) > 0:
@@ -982,44 +1001,46 @@ def create_google_maps_excel(points_df, polygons, points_assignment_df=None):
                             else:
                                 sheet_name = f"{city[:20]}_Без полигона"
                             
-                            sheet_name = sheet_name.replace('/', '_').replace('\\', '_').replace('?', '_').replace('*', '_').replace(':', '_').replace('[', '_').replace(']', '_')
+                            # Очищаем имя вкладки
+                            sheet_name = sheet_name[:31]
+                            invalid_chars = ['/', '\\', '?', '*', ':', '[', ']']
+                            for char in invalid_chars:
+                                sheet_name = sheet_name.replace(char, '_')
                             
-                            if len(sheet_name) > 31:
-                                sheet_name = sheet_name[:31]
-                            
-                            if sheet_name in writer.sheets:
-                                sheet_name = f"{sheet_name[:28]}_{sheet_counter}"
+                            # Проверяем уникальность
+                            original_name = sheet_name
+                            counter = 1
+                            while sheet_name in writer.sheets:
+                                sheet_name = f"{original_name[:28]}_{counter}"
+                                counter += 1
                             
                             polygon_points.to_excel(writer, sheet_name=sheet_name, index=False)
+                            
+                            sheet_info.append({
+                                'Вкладка': sheet_name,
+                                'Количество точек': len(polygon_points),
+                                'Город': city,
+                                'Полигон': polygon,
+                                'Аудиторов': polygon_points['Аудитор'].nunique()
+                            })
+                            
                             sheet_counter += 1
-                            processed_points += len(polygon_points)
-            
-            # Добавляем сводную вкладку
-            summary_data = []
-            for sheet_name in writer.sheets:
-                if sheet_name != 'Сводка':
-                    sheet_df = pd.read_excel(excel_buffer, sheet_name=sheet_name)
-                    summary_data.append({
-                        'Вкладка': sheet_name,
-                        'Количество точек': len(sheet_df),
-                        'Город': sheet_df['Город'].iloc[0] if 'Город' in sheet_df.columns and len(sheet_df) > 0 else 'Неизвестно',
-                        'Полигон': sheet_df['Полигон'].iloc[0] if 'Полигон' in sheet_df.columns and len(sheet_df) > 0 else 'Неизвестно',
-                        'Аудиторов': sheet_df['Аудитор'].nunique() if 'Аудитор' in sheet_df.columns else 0
-                    })
-            
-            if summary_data:
-                df_summary = pd.DataFrame(summary_data)
-                df_summary = df_summary.sort_values('Количество точек', ascending=False)
-                df_summary.to_excel(writer, sheet_name='Сводка', index=False)
-            
-            # Итоговая статистика
-            total_summary = pd.DataFrame([{
-                'Всего точек': total_rows,
-                'Обработано точек': processed_points,
-                'Количество вкладок': len(writer.sheets) - 1,  # минус сводка
-                'Дата выгрузки': datetime.now().strftime('%d.%m.%Y %H:%M')
-            }])
-            total_summary.to_excel(writer, sheet_name='Итог', index=False)
+        
+        # 6. Добавляем сводную вкладку
+        if sheet_info:
+            df_summary = pd.DataFrame(sheet_info)
+            df_summary = df_summary.sort_values('Количество точек', ascending=False)
+            df_summary.to_excel(writer, sheet_name='Сводка', index=False)
+        
+        # 7. Добавляем итоговую статистику
+        total_summary = pd.DataFrame([{
+            'Всего точек': total_rows,
+            'Количество вкладок': len(sheet_info),
+            'Количество городов': len(grouped_data),
+            'Дата выгрузки': datetime.now().strftime('%d.%m.%Y %H:%M'),
+            'Статус': '✅ Успешно создано' if total_rows > 0 else '⚠️ Нет данных'
+        }])
+        total_summary.to_excel(writer, sheet_name='Итог', index=False)
     
     return excel_buffer.getvalue()
 
@@ -2159,6 +2180,7 @@ if st.session_state.plan_calculated:
                   f"{len(st.session_state.polygons) if st.session_state.polygons else 0} полигонов, "
                   f"{len(st.session_state.auditors_df) if st.session_state.auditors_df is not None else 0} аудиторов")
     current_tab += 1
+
 
 
 
