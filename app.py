@@ -1938,7 +1938,7 @@ if calculate_button:
             
             st.success(f"✅ Распределено {len(detailed_plan_df)} записей по неделям")
 
-        !!!
+
         # Показываем краткую статистику распределения
         col1, col2, col3, col4 = st.columns(4)
         with col1:
@@ -1983,7 +1983,6 @@ if calculate_button:
         st.error(f"❌ Ошибка при загрузке или распределении данных: {str(e)}")
         import traceback
         st.error(f"Детали ошибки:\n{traceback.format_exc()}")
-        st.stop()
   
         # ==============================================
         # ПОЛНЫЙ РАСЧЕТ СО СТАТИСТИКОЙ
@@ -2734,6 +2733,7 @@ if st.session_state.plan_calculated:
                   f"{len(st.session_state.polygons) if st.session_state.polygons else 0} полигонов, "
                   f"{len(st.session_state.auditors_df) if st.session_state.auditors_df is not None else 0} аудиторов")
     current_tab += 1
+
 
 
 
