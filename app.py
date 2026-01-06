@@ -1949,6 +1949,12 @@ if calculate_button:
         with col4:
             total_visits = points_df['Кол-во_посещений'].sum()
             st.metric("Всего посещений", total_visits)
+            
+    except Exception as e:  # ← ДОБАВЬТЕ ЭТОТ except ДЛЯ ПЕРВОГО TRY
+        st.error(f"❌ Ошибка при загрузке или распределении данных: {str(e)}")
+        import traceback
+        st.error(f"Детали ошибки:\n{traceback.format_exc()}")
+        st.stop()
 
 # ==============================================
 # ОПТИМИЗАЦИЯ МАРШРУТОВ ПО ДНЯМ
@@ -2727,6 +2733,7 @@ if st.session_state.plan_calculated:
                   f"{len(st.session_state.polygons) if st.session_state.polygons else 0} полигонов, "
                   f"{len(st.session_state.auditors_df) if st.session_state.auditors_df is not None else 0} аудиторов")
     current_tab += 1
+
 
 
 
