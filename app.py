@@ -624,6 +624,160 @@ def distribute_visits_by_weeks(points_assignment_df, points_df, year, quarter, c
 # ==============================================
 # ФУНКЦИИ ДЛЯ РАСПРЕДЕЛЕНИЯ ПО АУДИТОРАМ
 # ==============================================
+# ==============================================
+# ФУНКЦИИ ДЛЯ РАСПРЕДЕЛЕНИЯ ПО АУДИТОРАМ (ГЕОГРАФИЧЕСКОЕ РАЗДЕЛЕНИЕ)
+# ==============================================
+
+def balance_point_groups(groups, n_auditors):
+    """
+    Балансирует количество точек между группами
+    """
+    # Удаляем пустые группы
+    groups = [g for g in groups if len(g) > 0]
+    
+    if len(groups) < n_auditors:
+        # Если некоторые группы пустые, перераспределяем
+        all_points = pd.concat(groups, ignore_index=True)
+        return np.array_split(all_points, n_auditors)
+    
+    # Вычисляем общее количество точек и целевое на группу
+    total_points = sum(len(g) for g in groups)
+    target_per_group = total_points // n_auditors
+    
+    # Сортируем группы по размеру (от большей к меньшей)
+    groups.sort(key=lambda x: len(x), reverse=True)
+    
+    # Балансируем
+    balanced_groups = []
+    points_to_redistribute = []
+    
+    for group in groups:
+        if len(group) > target_per_group:
+            # Берем лишние точки из большой группы
+            excess = len(group) - target_per_group
+            excess_points = group.sample(excess, random_state=42)
+            group = group.drop(excess_points.index)
+            points_to_redistribute.append(excess_points)
+        
+        balanced_groups.append(group)
+    
+    # Распределяем лишние точки по группам, которые меньше целевого размера
+    if points_to_redistribute:
+        all_excess = pd.concat(points_to_redistribute, ignore_index=True)
+        
+        for i in range(len(balanced_groups)):
+            if len(balanced_groups[i]) < target_per_group:
+                needed = target_per_group - len(balanced_groups[i])
+                if needed > 0 and len(all_excess) > 0:
+                    take = min(needed, len(all_excess))
+                    points_to_add = all_excess.iloc[:take]
+                    all_excess = all_excess.iloc[take:]
+                    balanced_groups[i] = pd.concat([balanced_groups[i], points_to_add])
+    
+    # Если остались лишние точки, распределяем их по всем группам
+    if len(all_excess) > 0:
+        for i in range(len(all_excess)):
+            balanced_groups[i % len(balanced_groups)] = pd.concat([
+                balanced_groups[i % len(balanced_groups)],
+                pd.DataFrame([all_excess.iloc[i]])
+            ])
+    
+    return balanced_groups
+
+
+def divide_points_by_direction(points_df, n_auditors, city):
+    """
+    Разделяет точки по географическим направлениям:
+    - 1 аудитор: все точки
+    - 2 аудитора: Север/Юг (по медианной широте)
+    - 3 аудитора: Север/Юго-Восток/Юго-Запад
+    - 4 аудитора: Север/Восток/Юг/Запад
+    Возвращает список DataFrames с точками для каждого аудитора
+    """
+    if n_auditors == 1:
+        return [points_df]
+    
+    if n_auditors <= 0:
+        return []
+    
+    # Сортируем точки по ID для воспроизводимости
+    points_df = points_df.sort_values('ID_Точки').copy()
+    
+    # Вычисляем медианные координаты
+    median_lat = points_df['Широта'].median()
+    median_lon = points_df['Долгота'].median()
+    
+    if n_auditors == 2:
+        # Север и Юг
+        north_mask = points_df['Широта'] >= median_lat
+        south_mask = points_df['Широта'] < median_lat
+        
+        north_points = points_df[north_mask].copy()
+        south_points = points_df[south_mask].copy()
+        
+        # Балансируем количество точек
+        total_points = len(points_df)
+        target_per_auditor = total_points // n_auditors
+        
+        # Если распределение неравномерное, перемещаем точки
+        if len(north_points) > target_per_auditor + 1:
+            # Перемещаем крайние северные точки на юг
+            excess = len(north_points) - target_per_auditor
+            north_to_move = north_points.nlargest(excess, 'Широта')
+            north_points = north_points.drop(north_to_move.index)
+            south_points = pd.concat([south_points, north_to_move])
+        elif len(south_points) > target_per_auditor + 1:
+            # Перемещаем крайние южные точки на север
+            excess = len(south_points) - target_per_auditor
+            south_to_move = south_points.nsmallest(excess, 'Широта')
+            south_points = south_points.drop(south_to_move.index)
+            north_points = pd.concat([north_points, south_to_move])
+        
+        return [north_points, south_points]
+    
+    elif n_auditors == 3:
+        # Север, Юго-Восток, Юго-Запад
+        # Север: точки выше медианной широты
+        north_mask = points_df['Широта'] >= median_lat
+        south_mask = points_df['Широта'] < median_lat
+        
+        north_points = points_df[north_mask].copy()
+        south_points = points_df[south_mask].copy()
+        
+        # Южные точки делим на Восток и Запад
+        southeast_mask = south_mask & (points_df['Долгота'] >= median_lon)
+        southwest_mask = south_mask & (points_df['Долгота'] < median_lon)
+        
+        southeast_points = points_df[southeast_mask].copy()
+        southwest_points = points_df[southwest_mask].copy()
+        
+        # Собираем все группы
+        groups = [north_points, southeast_points, southwest_points]
+        
+        # Балансируем количество точек
+        return balance_point_groups(groups, n_auditors)
+    
+    elif n_auditors == 4:
+        # Северо-Восток, Северо-Запад, Юго-Восток, Юго-Запад (квадранты)
+        ne_mask = (points_df['Широта'] >= median_lat) & (points_df['Долгота'] >= median_lon)
+        nw_mask = (points_df['Широта'] >= median_lat) & (points_df['Долгота'] < median_lon)
+        se_mask = (points_df['Широта'] < median_lat) & (points_df['Долгота'] >= median_lon)
+        sw_mask = (points_df['Широта'] < median_lat) & (points_df['Долгота'] < median_lon)
+        
+        ne_points = points_df[ne_mask].copy()
+        nw_points = points_df[nw_mask].copy()
+        se_points = points_df[se_mask].copy()
+        sw_points = points_df[sw_mask].copy()
+        
+        groups = [ne_points, nw_points, se_points, sw_points]
+        
+        # Балансируем количество точек
+        return balance_point_groups(groups, n_auditors)
+    
+    else:
+        # Для более чем 4 аудиторов используем простое деление
+        return np.array_split(points_df, n_auditors)
+
 
 def distribute_points_to_auditors(points_df, auditors_df):
     """Распределяет точки по аудиторам с географическим разделением"""
@@ -2174,6 +2328,7 @@ if st.session_state.plan_calculated:
                   f"{len(st.session_state.polygons) if st.session_state.polygons else 0} полигонов, "
                   f"{len(st.session_state.auditors_df) if st.session_state.auditors_df is not None else 0} аудиторов")
     current_tab += 1
+
 
 
 
