@@ -397,6 +397,289 @@ def get_weeks_in_quarter(year, quarter):
     return weeks
 
 # ==============================================
+# КЛАСС ДЛЯ ОПТИМИЗАЦИИ МАРШРУТОВ ПО ДНЯМ
+# ==============================================
+
+class WeeklyRouteOptimizer:
+    """
+    Оптимизатор маршрутов на основе логики из optimizer.py
+    Распределяет точки по дням недели и строит оптимальные маршруты
+    """
+    
+    @staticmethod
+    def calculate_distance(lat1, lon1, lat2, lon2):
+        """Расчет евклидова расстояния между точками"""
+        return math.sqrt((lat2 - lat1)**2 + (lon2 - lon1)**2)
+    
+    @staticmethod
+    def greedy_route(points):
+        """
+        Жадный алгоритм построения маршрута
+        Начинает с самой дальней точки от центра
+        """
+        if len(points) <= 1:
+            return points
+        
+        # Вычисляем центр всех точек
+        center_lat = np.mean([p['Широта'] for p in points])
+        center_lon = np.mean([p['Долгота'] for p in points])
+        
+        # Находим самую дальнюю точку от центра
+        start_idx = max(range(len(points)),
+                       key=lambda i: WeeklyRouteOptimizer.calculate_distance(
+                           points[i]['Широта'], points[i]['Долгота'],
+                           center_lat, center_lon
+                       ))
+        
+        route = [points[start_idx]]
+        unvisited = points[:start_idx] + points[start_idx+1:]
+        
+        while unvisited:
+            last_point = route[-1]
+            
+            # Находим ближайшую непосещенную точку
+            nearest_idx = min(range(len(unvisited)),
+                key=lambda i: WeeklyRouteOptimizer.calculate_distance(
+                    last_point['Широта'], last_point['Долгота'],
+                    unvisited[i]['Широта'], unvisited[i]['Долгота']
+                ))
+            
+            route.append(unvisited[nearest_idx])
+            unvisited.pop(nearest_idx)
+        
+        return route
+    
+    @staticmethod
+    def distribute_points_to_days(points_list, visits_per_point, working_days):
+        """
+        Распределяет точки по рабочим дням недели
+        points_list: список словарей с точками
+        visits_per_point: сколько раз нужно посетить каждую точку
+        working_days: список дат рабочих дней недели
+        """
+        if not points_list or not working_days:
+            return {}
+        
+        # Создаем список всех посещений
+        all_visits = []
+        for point in points_list:
+            point_id = point['ID_Точки']
+            visits = visits_per_point.get(point_id, 1)
+            for _ in range(visits):
+                all_visits.append(point.copy())
+        
+        # Равномерно распределяем по дням
+        visits_by_day = {}
+        days_count = len(working_days)
+        
+        for i, visit in enumerate(all_visits):
+            day_index = i % days_count
+            day_date = working_days[day_index]
+            
+            if day_date not in visits_by_day:
+                visits_by_day[day_date] = []
+            
+            visits_by_day[day_date].append(visit)
+        
+        return visits_by_day
+    
+    @staticmethod
+    def optimize_week_for_auditor(auditor_points, visits_needed, week_dates, auditor_id):
+        """
+        Оптимизирует маршруты для аудитора на неделю
+        Возвращает список визитов с указанием дня недели
+        """
+        results = []
+        
+        # Определяем рабочие дни (понедельник-пятница)
+        working_days = []
+        for day_date in week_dates:
+            # Проверяем что это datetime/date объект
+            if hasattr(day_date, 'weekday'):
+                if day_date.weekday() < 5:  # 0-4 = Пн-Пт
+                    working_days.append(day_date)
+        
+        if not working_days:
+            return results
+        
+        # Распределяем точки по дням
+        visits_by_day = WeeklyRouteOptimizer.distribute_points_to_days(
+            auditor_points, visits_needed, working_days
+        )
+        
+        # Для каждого дня строим оптимальный маршрут
+        for day_date, day_points in visits_by_day.items():
+            if not day_points:
+                continue
+            
+            # Строим оптимальный маршрут для дня
+            optimized_route = WeeklyRouteOptimizer.greedy_route(day_points)
+            
+            # Добавляем каждую точку в результат с указанием дня
+            # Преобразуем в datetime если нужно
+            if isinstance(day_date, date):
+                day_datetime = datetime.combine(day_date, datetime.min.time())
+            else:
+                day_datetime = day_date
+            
+            day_of_week = day_datetime.weekday()  # 0=понедельник, 4=пятница
+            
+            for point in optimized_route:
+                results.append({
+                    'ID_Точки': point['ID_Точки'],
+                    'Дата': day_datetime,
+                    'День_недели': day_of_week,
+                    'Аудитор': auditor_id,
+                    'Широта': point['Широта'],
+                    'Долгота': point['Долгота']
+                })
+        
+        return results
+
+# ==============================================
+# ФУНКЦИИ ДЛЯ СОЗДАНИЯ ВЫХОДНОЙ ТАБЛИЦЫ
+# ==============================================
+
+def create_weekly_route_schedule(points_df, points_assignment_df, detailed_plan_df, 
+                                 auditors_df, year, quarter):
+    """
+    Создает таблицу с маршрутами в формате:
+    Address | L1 Name | ЧИСЛО визитов в НЕДЕЛЮ | Login | Пн | Вт | Ср | Чт | Пт | Сб | Вс | Цикл | Дата начала
+    """
+    
+    if points_df is None or points_df.empty:
+        return pd.DataFrame()
+    
+    if points_assignment_df is None or points_assignment_df.empty:
+        return pd.DataFrame()
+    
+    # 1. Подготавливаем данные
+    # Словарь посещений по точкам
+    visits_per_point = points_df.set_index('ID_Точки')['Кол-во_посещений'].to_dict()
+    
+    # Словарь точек по аудиторам
+    auditor_points = {}
+    for auditor in auditors_df['ID_Сотрудника'].unique():
+        # Находим точки этого аудитора
+        auditor_point_ids = points_assignment_df[
+            points_assignment_df['Аудитор'] == auditor
+        ]['ID_Точки'].tolist()
+        
+        if not auditor_point_ids:
+            continue
+            
+        # Получаем полные данные точек
+        auditor_data = points_df[
+            points_df['ID_Точки'].isin(auditor_point_ids)
+        ]
+        
+        # Преобразуем в список словарей
+        if not auditor_data.empty:
+            auditor_points[auditor] = auditor_data.to_dict('records')
+    
+    if not auditor_points:
+        return pd.DataFrame()
+    
+    # 2. Получаем недели квартала
+    weeks_info = get_weeks_in_quarter(year, quarter)
+    
+    all_results = []
+    
+    # 3. Обрабатываем каждую неделю
+    for week_info in weeks_info:
+        week_start = week_info['start_date']
+        week_end = week_info['end_date']
+        iso_week = week_info['iso_week_number']
+        
+        # Даты недели (понедельник-воскресенье)
+        week_dates = [week_start + timedelta(days=i) for i in range(7)]
+        
+        # 4. Оптимизируем для каждого аудитора
+        for auditor, points_list in auditor_points.items():
+            if not points_list:
+                continue
+            
+            # Оптимизируем неделю для аудитора
+            week_visits = WeeklyRouteOptimizer.optimize_week_for_auditor(
+                points_list,
+                visits_per_point,
+                week_dates,
+                auditor
+            )
+            
+            # Добавляем информацию о неделе
+            for visit in week_visits:
+                visit['Неделя'] = iso_week
+                visit['Дата_начала_недели'] = week_start
+                visit['Дата_окончания_недели'] = week_end
+            
+            all_results.extend(week_visits)
+    
+    # 5. Преобразуем в DataFrame
+    if not all_results:
+        return pd.DataFrame()
+    
+    results_df = pd.DataFrame(all_results)
+    
+    # 6. Создаем финальную таблицу в требуемом формате
+    final_rows = []
+    
+    # Группируем по точкам и неделям
+    grouped = results_df.groupby(['ID_Точки', 'Неделя', 'Аудитор'])
+    
+    for (point_id, week_num, auditor), group in grouped:
+        # Находим информацию о точке
+        point_mask = points_df['ID_Точки'] == point_id
+        if not point_mask.any():
+            continue
+            
+        point_info = points_df[point_mask].iloc[0]
+        
+        # Количество визитов на этой неделе
+        visits_this_week = len(group)
+        
+        # Дни недели когда есть визиты
+        days_visited = set(group['День_недели'].tolist())
+        
+        # Дата начала недели (понедельник)
+        week_start_date = group['Дата_начала_недели'].iloc[0]
+        
+        # Преобразуем в строку YYYYMMDD
+        if isinstance(week_start_date, (datetime, pd.Timestamp)):
+            start_date_str = week_start_date.strftime('%Y%m%d')
+        else:
+            start_date_str = str(week_start_date).replace('-', '')
+        
+        # Создаем строку
+        row = {
+            'Address': point_info.get('Адрес', ''),
+            'L1 Name': point_info.get('Название_Точки', point_id),
+            'ЧИСЛО визитов в НЕДЕЛЮ': visits_this_week,
+            'Login пользователя': auditor,
+            'Понедельник': 1 if 0 in days_visited else '',
+            'Вторник': 1 if 1 in days_visited else '',
+            'Среда': 1 if 2 in days_visited else '',
+            'Четверг': 1 if 3 in days_visited else '',
+            'Пятница': 1 if 4 in days_visited else '',
+            'Суббота': 1 if 5 in days_visited else '',
+            'Воскресенье': 1 if 6 in days_visited else '',
+            'Цикл посещения': week_num,
+            'Дата начала цикла посещения': start_date_str
+        }
+        
+        final_rows.append(row)
+    
+    if not final_rows:
+        return pd.DataFrame()
+    
+    final_df = pd.DataFrame(final_rows)
+    
+    # Сортируем
+    final_df = final_df.sort_values(['Login пользователя', 'Дата начала цикла посещения', 'L1 Name'])
+    
+    return final_df
+                                     
+# ==============================================
 # ФУНКЦИИ ДЛЯ ГЕНЕРАЦИИ ПОЛИГОНОВ И РАСПРЕДЕЛЕНИЯ
 # ==============================================
 
@@ -1666,6 +1949,34 @@ if calculate_button:
         with col4:
             total_visits = points_df['Кол-во_посещений'].sum()
             st.metric("Всего посещений", total_visits)
+
+# ==============================================
+# ОПТИМИЗАЦИЯ МАРШРУТОВ ПО ДНЯМ
+# ==============================================
+
+with st.spinner("🗺️ Оптимизация маршрутов по дням недели..."):
+    try:
+        # Создаем таблицу с маршрутами
+        routes_df = create_weekly_route_schedule(
+            points_df,
+            points_assignment_df,
+            detailed_plan_df,
+            auditors_df,
+            year,
+            quarter
+        )
+        
+        if not routes_df.empty:
+            st.session_state.routes_df = routes_df
+            st.success(f"✅ Построены маршруты: {len(routes_df)} записей")
+            st.info("📋 Маршруты доступны во вкладке 'План посещений' для выгрузки в формате EasyMerch")
+        else:
+            st.warning("⚠️ Не удалось построить маршруты")
+            
+    except Exception as e:
+        st.error(f"❌ Ошибка при оптимизации маршрутов: {str(e)}")
+        import traceback
+        st.error(f"Детали ошибки:\n{traceback.format_exc()}")
         
         # ==============================================
         # ПОЛНЫЙ РАСЧЕТ СО СТАТИСТИКОЙ
@@ -1961,53 +2272,154 @@ if st.session_state.plan_calculated:
                                 height=400,
                                 hide_index=True
                             )
+                           
+                            # Показываем краткий предпросмотр маршрутов
+                            if 'routes_df' in st.session_state and st.session_state.routes_df is not None:
+                                st.markdown("---")
+                                st.subheader("🗺️ Маршруты для EasyMerch")
+                                
+                                routes_df = st.session_state.routes_df
+                                
+                                if not routes_df.empty:
+                                    # Быстрые фильтры
+                                    col1, col2 = st.columns(2)
+                                    with col1:
+                                        # Показываем только первые 20 строк для предпросмотра
+                                        preview_df = routes_df.head(20)
+                                        st.write(f"**Предпросмотр (первые 20 из {len(routes_df)} строк):**")
+                                        st.dataframe(preview_df, use_container_width=True, height=300)
+                                    
+                                    with col2:
+                                        # Статистика
+                                        st.write("**📊 Статистика маршрутов:**")
+                                        st.write(f"• Всего записей: {len(routes_df)}")
+                                        st.write(f"• Аудиторов: {routes_df['Login пользователя'].nunique()}")
+                                        st.write(f"• Недель: {routes_df['Цикл посещения'].nunique()}")
+                                        st.write(f"• Уникальных точек: {routes_df['L1 Name'].nunique()}")
+                                        
+                                        # Общее количество визитов
+                                        total_visits = routes_df['ЧИСЛО визитов в НЕДЕЛЮ'].sum()
+                                        st.write(f"• Всего визитов в неделю: {total_visits}")
+                                else:
+                                    st.info("Маршруты рассчитаны, но данные пустые")
                             
-                            # Выгрузка в Excel
+                            # Выгрузка данных
                             st.markdown("---")
                             st.subheader("💾 Выгрузка данных")
                             
-                            col1, col2 = st.columns(2)
+                            # Теперь 3 колонки вместо 2
+                            col1, col2, col3 = st.columns(3)
                             
                             with col1:
-                                # Выгрузка отфильтрованных данных
-                                try:
-                                    excel_buffer = io.BytesIO()
-                                    with pd.ExcelWriter(excel_buffer, engine='openpyxl') as writer:
-                                        filtered_df.to_excel(writer, sheet_name='План_посещений', index=False)
-                                    
-                                    excel_data = excel_buffer.getvalue()
+                                # Выгрузка отфильтрованных данных в Excel
+                                if filtered_df is not None and not filtered_df.empty:
+                                    try:
+                                        excel_buffer = io.BytesIO()
+                                        with pd.ExcelWriter(excel_buffer, engine='openpyxl') as writer:
+                                            filtered_df.to_excel(writer, sheet_name='План_посещений', index=False)
+                                        
+                                        excel_data = excel_buffer.getvalue()
+                                        st.download_button(
+                                            label="📥 Скачать Excel (фильтр)",
+                                            data=excel_data,
+                                            file_name=f"план_посещений_{year}_Q{quarter}_фильтр.xlsx",
+                                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                                            use_container_width=True
+                                        )
+                                    except Exception as e:
+                                        st.error(f"❌ Ошибка Excel: {str(e)}")
+                                else:
+                                    st.info("Нет данных для выгрузки")
                                     st.download_button(
                                         label="📥 Скачать Excel (фильтр)",
-                                        data=excel_data,
-                                        file_name=f"план_посещений_{year}_Q{quarter}_фильтр.xlsx",
+                                        data=b"",
+                                        file_name="план_посещений.xlsx",
                                         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                                        use_container_width=True
+                                        use_container_width=True,
+                                        disabled=True
                                     )
-                                except Exception as e:
-                                    st.error(f"❌ Ошибка: {str(e)}")
                             
                             with col2:
-                                # Выгрузка всех данных
-                                try:
-                                    excel_buffer = io.BytesIO()
-                                    with pd.ExcelWriter(excel_buffer, engine='openpyxl') as writer:
-                                        summary_df.to_excel(writer, sheet_name='План_посещений', index=False)
-                                    
-                                    excel_data = excel_buffer.getvalue()
+                                # Выгрузка всех данных в Excel
+                                if summary_df is not None and not summary_df.empty:
+                                    try:
+                                        excel_buffer = io.BytesIO()
+                                        with pd.ExcelWriter(excel_buffer, engine='openpyxl') as writer:
+                                            summary_df.to_excel(writer, sheet_name='План_посещений', index=False)
+                                        
+                                        excel_data = excel_buffer.getvalue()
+                                        st.download_button(
+                                            label="📥 Скачать Excel (все данные)",
+                                            data=excel_data,
+                                            file_name=f"план_посещений_{year}_Q{quarter}_все.xlsx",
+                                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                                            use_container_width=True
+                                        )
+                                    except Exception as e:
+                                        st.error(f"❌ Ошибка Excel: {str(e)}")
+                                else:
+                                    st.info("Нет данных для выгрузки")
                                     st.download_button(
                                         label="📥 Скачать Excel (все данные)",
-                                        data=excel_data,
-                                        file_name=f"план_посещений_{year}_Q{quarter}_все.xlsx",
+                                        data=b"",
+                                        file_name="план_посещений.xlsx",
                                         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                                        use_container_width=True
+                                        use_container_width=True,
+                                        disabled=True
                                     )
-                                except Exception as e:
-                                    st.error(f"❌ Ошибка: {str(e)}")
-                        else:
-                            st.info("Нет данных по выбранным фильтрам")
-                    else:
-                        st.info("Нет данных для отображения")
-            current_tab += 1
+                            
+                            with col3:
+                                # Выгрузка для EasyMerch
+                                if 'routes_df' in st.session_state and st.session_state.routes_df is not None:
+                                    routes_df = st.session_state.routes_df
+                                    
+                                    if routes_df is not None and not routes_df.empty:
+                                        # Кнопка скачивания CSV для EasyMerch
+                                        csv_data = routes_df.to_csv(index=False, sep=';').encode('utf-8')
+                                        
+                                        st.download_button(
+                                            label="📊 Выгрузка для EasyMerch",
+                                            data=csv_data,
+                                            file_name=f"easymerch_маршруты_{year}_Q{quarter}.csv",
+                                            mime="text/csv",
+                                            use_container_width=True,
+                                            help="Формат: Address | L1 Name | ЧИСЛО визитов в НЕДЕЛЮ | Login | Пн | Вт | Ср | Чт | Пт | Сб | Вс | Цикл | Дата начала"
+                                        )
+                                        
+                                        # Информация о формате
+                                        with st.expander("ℹ️ Формат EasyMerch", expanded=False):
+                                            st.markdown("""
+                                            **Структура файла:**
+                                            - Address: Адрес точки
+                                            - L1 Name: Название точки  
+                                            - ЧИСЛО визитов в НЕДЕЛЮ: Сколько раз посещать
+                                            - Login пользователя: ID аудитора
+                                            - Пн-Вс: 1 если визит в этот день
+                                            - Цикл посещения: Номер недели
+                                            - Дата начала цикла: Дата понедельника (YYYYMMDD)
+                                            """)
+                                    else:
+                                        st.info("Маршруты не рассчитаны")
+                                        st.download_button(
+                                            label="📊 Выгрузка для EasyMerch",
+                                            data=b"",
+                                            file_name="маршруты.csv",
+                                            mime="text/csv",
+                                            use_container_width=True,
+                                            disabled=True,
+                                            help="Сначала рассчитайте маршруты"
+                                        )
+                                else:
+                                    st.info("Маршруты не рассчитаны")
+                                    st.download_button(
+                                        label="📊 Выгрузка для EasyMerch",
+                                        data=b"",
+                                        file_name="маршруты.csv",
+                                        mime="text/csv",
+                                        use_container_width=True,
+                                        disabled=True,
+                                        help="Сначала рассчитайте маршруты"
+                                    )
         
         # ВКЛАДКА 3: Диаграммы
         if "📈 Диаграммы" in available_tabs:
@@ -2315,6 +2727,7 @@ if st.session_state.plan_calculated:
                   f"{len(st.session_state.polygons) if st.session_state.polygons else 0} полигонов, "
                   f"{len(st.session_state.auditors_df) if st.session_state.auditors_df is not None else 0} аудиторов")
     current_tab += 1
+
 
 
 
