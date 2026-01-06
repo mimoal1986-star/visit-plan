@@ -1937,7 +1937,8 @@ if calculate_button:
                 st.stop()
             
             st.success(f"✅ Распределено {len(detailed_plan_df)} записей по неделям")
-        
+
+        !!!
         # Показываем краткую статистику распределения
         col1, col2, col3, col4 = st.columns(4)
         with col1:
@@ -1949,41 +1950,41 @@ if calculate_button:
         with col4:
             total_visits = points_df['Кол-во_посещений'].sum()
             st.metric("Всего посещений", total_visits)
+
+        # ==============================================
+        # ОПТИМИЗАЦИЯ МАРШРУТОВ ПО ДНЯМ (ВНУТРИ TRY!)
+        # ==============================================
+        
+        with st.spinner("🗺️ Оптимизация маршрутов по дням недели..."):
+            try:
+                # Создаем таблицу с маршрутами
+                routes_df = create_weekly_route_schedule(
+                    points_df,
+                    points_assignment_df,
+                    detailed_plan_df,
+                    auditors_df,
+                    year,
+                    quarter
+                )
+                
+                if not routes_df.empty:
+                    st.session_state.routes_df = routes_df
+                    st.success(f"✅ Построены маршруты: {len(routes_df)} записей")
+                    st.info("📋 Маршруты доступны во вкладке 'План посещений' для выгрузки в формате EasyMerch")
+                else:
+                    st.warning("⚠️ Не удалось построить маршруты")
+                    
+            except Exception as e:
+                st.error(f"❌ Ошибка при оптимизации маршрутов: {str(e)}")
+                import traceback
+                st.error(f"Детали ошибки:\n{traceback.format_exc()}")
             
-    except Exception as e:  # ← ДОБАВЬТЕ ЭТОТ except ДЛЯ ПЕРВОГО TRY
+    except Exception as e:  # ← ЭТОТ except ЗАКРЫВАЕТ ВЕСЬ КОД
         st.error(f"❌ Ошибка при загрузке или распределении данных: {str(e)}")
         import traceback
         st.error(f"Детали ошибки:\n{traceback.format_exc()}")
         st.stop()
-
-# ==============================================
-# ОПТИМИЗАЦИЯ МАРШРУТОВ ПО ДНЯМ
-# ==============================================
-
-with st.spinner("🗺️ Оптимизация маршрутов по дням недели..."):
-    try:
-        # Создаем таблицу с маршрутами
-        routes_df = create_weekly_route_schedule(
-            points_df,
-            points_assignment_df,
-            detailed_plan_df,
-            auditors_df,
-            year,
-            quarter
-        )
-        
-        if not routes_df.empty:
-            st.session_state.routes_df = routes_df
-            st.success(f"✅ Построены маршруты: {len(routes_df)} записей")
-            st.info("📋 Маршруты доступны во вкладке 'План посещений' для выгрузки в формате EasyMerch")
-        else:
-            st.warning("⚠️ Не удалось построить маршруты")
-            
-    except Exception as e:
-        st.error(f"❌ Ошибка при оптимизации маршрутов: {str(e)}")
-        import traceback
-        st.error(f"Детали ошибки:\n{traceback.format_exc()}")
-        
+  
         # ==============================================
         # ПОЛНЫЙ РАСЧЕТ СО СТАТИСТИКОЙ
         # ==============================================
@@ -2733,6 +2734,7 @@ if st.session_state.plan_calculated:
                   f"{len(st.session_state.polygons) if st.session_state.polygons else 0} полигонов, "
                   f"{len(st.session_state.auditors_df) if st.session_state.auditors_df is not None else 0} аудиторов")
     current_tab += 1
+
 
 
 
