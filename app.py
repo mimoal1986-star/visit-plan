@@ -1839,7 +1839,6 @@ st.markdown("---")
 
 # ТОЛЬКО ОДНА КНОПКА ВСЕМ КОДЕ!
 calculate_button = st.button("🚀 Рассчитать план", type="primary", use_container_width=True, key="calculate_plan_btn")
-
 if calculate_button:
     
     if 'data_file' not in st.session_state or st.session_state.data_file is None:
@@ -1949,75 +1948,6 @@ if calculate_button:
         with col4:
             total_visits = points_df['Кол-во_посещений'].sum()
             st.metric("Всего посещений", total_visits)
-        
-        # Показываем предпросмотр данных
-        st.success("✅ Данные успешно загружены!")
-        
-        with st.expander("📋 Предпросмотр загруженных данных", expanded=False):
-            tab1, tab2, tab3 = st.tabs(["Точки", "Аудиторы", "Факт посещений"])
-            
-            with tab1:
-                st.write(f"Загружено точек: {len(points_df)}")
-                st.dataframe(points_df.head(10), use_container_width=True)
-            
-            with tab2:
-                st.write(f"Загружено аудиторов: {len(auditors_df)}")
-                st.dataframe(auditors_df.head(10), use_container_width=True)
-            
-            with tab3:
-                if not visits_df.empty:
-                    st.write(f"Загружено записей о посещениях: {len(visits_df)}")
-                    st.dataframe(visits_df.head(10), use_container_width=True)
-                else:
-                    st.info("Данные о посещениях отсутствуют")
-        
-        st.markdown("---")
-        st.header("📅 Расчет плана визитов")
-        
-        with st.spinner("🔄 Распределение точек по аудиторам..."):
-            # Распределяем точки по аудиторам
-            points_assignment_df, polygons_info = distribute_points_to_auditors(points_df, auditors_df)
-            
-            # ИСПРАВЛЕНИЕ: проверяем оба возвращаемых значения
-            if points_assignment_df is None or polygons_info is None:
-                st.error("❌ Не удалось распределить точки по аудиторам")
-                st.stop()
-            
-            # ✅ СОХРАНЯЕМ ДАННЫЕ ДЛЯ ВЫГРУЗКИ
-            st.session_state.points_assignment_df = points_assignment_df  # ДЛЯ GOOGLE MAPS
-            st.session_state.polygons_info = polygons_info  # ДЛЯ ПОЛИГОНОВ
-            
-            # Генерируем полигоны
-            polygons = generate_polygons(polygons_info)
-            st.session_state.polygons = polygons
-            
-            st.success(f"✅ Точки распределены по {len(polygons_info)} полигонам")
-            st.success(f"✅ Сохранено {len(points_assignment_df)} назначений точек")
-        
-        with st.spinner("🔄 Распределение посещений по неделям..."):
-            # Распределяем посещения по неделям
-            detailed_plan_df = distribute_visits_by_weeks(
-                points_assignment_df, points_df, year, quarter, coefficients
-            )
-            
-            if detailed_plan_df.empty:
-                st.error("❌ Не удалось распределить посещения по неделям")
-                st.stop()
-            
-            st.success(f"✅ Распределено {len(detailed_plan_df)} записей по неделям")
-
-
-        # Показываем краткую статистику распределения
-        col1, col2, col3, col4 = st.columns(4)
-        with col1:
-            st.metric("Всего точек", len(points_df))
-        with col2:
-            st.metric("Всего аудиторов", len(auditors_df))
-        with col3:
-            st.metric("Полигонов", len(polygons))
-        with col4:
-            total_visits = points_df['Кол-во_посещений'].sum()
-            st.metric("Всего посещений", total_visits)
 
         # ==============================================
         # ОПТИМИЗАЦИЯ МАРШРУТОВ ПО ДНЯМ
@@ -2044,14 +1974,7 @@ if calculate_button:
                     
             except Exception as e:
                 st.error(f"❌ Ошибка при оптимизации маршрутов: {str(e)}")
-                import traceback
-                st.error(f"Детали ошибки:\n{traceback.format_exc()}")
-            
-    except Exception as e:  # ← ЭТОТ except ЗАКРЫВАЕТ ВЕСЬ КОД
-        st.error(f"❌ Ошибка при загрузке или распределении данных: {str(e)}")
-        import traceback
-        st.error(f"Детали ошибки:\n{traceback.format_exc()}")
-  
+
         # ==============================================
         # ПОЛНЫЙ РАСЧЕТ СО СТАТИСТИКОЙ
         # ==============================================
@@ -2801,6 +2724,7 @@ if st.session_state.plan_calculated:
                   f"{len(st.session_state.polygons) if st.session_state.polygons else 0} полигонов, "
                   f"{len(st.session_state.auditors_df) if st.session_state.auditors_df is not None else 0} аудиторов")
     current_tab += 1
+
 
 
 
