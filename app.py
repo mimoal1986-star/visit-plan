@@ -928,6 +928,14 @@ def create_weekly_route_schedule(points_df, points_assignment_df, auditors_df, y
         else:
             start_date_str = str(week_start_date).replace('-', '')
         
+        # Получаем координаты
+        try:
+            latitude = float(point_info.get('Широта', 0))
+            longitude = float(point_info.get('Долгота', 0))
+        except (ValueError, TypeError):
+            latitude = 0
+            longitude = 0
+        
         # Создаем строку
         row = {
             'Address': point_info.get('Адрес', ''),
@@ -942,7 +950,9 @@ def create_weekly_route_schedule(points_df, points_assignment_df, auditors_df, y
             'Суббота': 1 if 5 in days_visited else '',
             'Воскресенье': 1 if 6 in days_visited else '',
             'Цикл посещения': week_num,
-            'Дата начала цикла посещения': start_date_str
+            'Дата начала цикла посещения': start_date_str,
+            'Широта': f"{latitude:.6f}",  # Добавлено: 6 знаков после запятой
+            'Долгота': f"{longitude:.6f}"   # Добавлено: 6 знаков после запятой
         }
         
         final_rows.append(row)
@@ -3149,6 +3159,7 @@ if st.session_state.plan_calculated:
                   f"{len(st.session_state.polygons) if st.session_state.polygons else 0} полигонов, "
                   f"{len(st.session_state.auditors_df) if st.session_state.auditors_df is not None else 0} аудиторов")
     current_tab += 1
+
 
 
 
