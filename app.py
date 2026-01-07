@@ -2271,8 +2271,7 @@ if calculate_button:
                 routes_df = create_weekly_route_schedule(
                     points_df,
                     points_assignment_df,
-                    detailed_plan_df,
-                    auditors_df,
+                    auditors_df,  # ← ТОЛЬКО 5 АРГУМЕНТОВ!
                     year,
                     quarter
                 )
@@ -2286,6 +2285,8 @@ if calculate_button:
                     
             except Exception as e:
                 st.error(f"❌ Ошибка при оптимизации маршрутов: {str(e)}")
+                import traceback
+                st.error(f"Детали ошибки:\n{traceback.format_exc()}")
 
         # ==============================================
         # ПОЛНЫЙ РАСЧЕТ СО СТАТИСТИКОЙ
@@ -3066,6 +3067,7 @@ if st.session_state.plan_calculated:
                   f"{len(st.session_state.polygons) if st.session_state.polygons else 0} полигонов, "
                   f"{len(st.session_state.auditors_df) if st.session_state.auditors_df is not None else 0} аудиторов")
     current_tab += 1
+
 
 
 
