@@ -37,6 +37,13 @@ except:
     SCIPY_AVAILABLE = False
     st.sidebar.info("ℹ️ Используется упрощенная генерация полигонов")
 
+# Для расчета рабочих дней с праздниками
+try:
+    from workalendar.europe import Russia
+    WORKALENDAR_AVAILABLE = True
+except ImportError:
+    WORKALENDAR_AVAILABLE = False
+
 # НАСТРОЙКА СТРАНИЦЫ
 st.set_page_config(
     page_title="Калькулятор плана визитов",
@@ -537,14 +544,209 @@ class WeeklyRouteOptimizer:
         return results
 
 # ==============================================
-# ФУНКЦИИ ДЛЯ СОЗДАНИЯ ВЫХОДНОЙ ТАБЛИЦЫ
+# ФУНКЦИИ ДЛЯ РАСЧЕТА РАБОЧИХ ДНЕЙ И КЛАСТЕРИЗАЦИИ
 # ==============================================
 
-def create_weekly_route_schedule(points_df, points_assignment_df, detailed_plan_df, 
-                                 auditors_df, year, quarter):
+def get_working_days_for_quarter(year, quarter):
     """
-    Создает таблицу с маршрутами в формате:
-    Address | L1 Name | ЧИСЛО визитов в НЕДЕЛЮ | Login | Пн | Вт | Ср | Чт | Пт | Сб | Вс | Цикл | Дата начала
+    Возвращает список рабочих дней в квартале
+    с учетом российских праздников (использует workalendar если доступен)
+    """
+    quarter_start, quarter_end = get_quarter_dates(year, quarter)
+    
+    if WORKALENDAR_AVAILABLE:
+        # Используем библиотеку workalendar для точного расчета
+        cal = Russia()
+        working_days = []
+        current_date = quarter_start
+        
+        while current_date <= quarter_end:
+            if cal.is_working_day(current_date):
+                working_days.append(current_date)
+            current_date += timedelta(days=1)
+        
+        return working_days
+    else:
+        # Простая версия: только понедельник-пятница
+        st.sidebar.warning("⚠️ Для учета праздников установите: pip install workalendar")
+        
+        working_days = []
+        current_date = quarter_start
+        
+        while current_date <= quarter_end:
+            if current_date.weekday() < 5:  # Пн-Пт
+                working_days.append(current_date)
+            current_date += timedelta(days=1)
+        
+        return working_days
+
+def simple_cluster_points(points, n_clusters):
+    """
+    Простая кластеризация без sklearn
+    Разделяет точки на n_clusters групп по близости
+    """
+    if not points:
+        return [[] for _ in range(n_clusters)]
+    
+    if len(points) <= n_clusters:
+        # Каждая точка в своей группе
+        clusters = [[p] for p in points]
+        # Добавляем пустые группы если нужно
+        while len(clusters) < n_clusters:
+            clusters.append([])
+        return clusters
+    
+    # Выбираем начальные центры (самые удаленные точки)
+    centers = []
+    
+    # Первый центр - первая точка
+    centers.append(points[0])
+    
+    # Остальные центры - самые удаленные от уже выбранных
+    for _ in range(1, n_clusters):
+        max_min_distance = -1
+        best_point = None
+        
+        for point in points:
+            if point in centers:
+                continue
+            
+            # Минимальное расстояние до существующих центров
+            min_dist = float('inf')
+            for center in centers:
+                dist = WeeklyRouteOptimizer.calculate_distance(
+                    point['Широта'], point['Долгота'],
+                    center['Широта'], center['Долгота']
+                )
+                min_dist = min(min_dist, dist)
+            
+            if min_dist > max_min_distance:
+                max_min_distance = min_dist
+                best_point = point
+        
+        if best_point:
+            centers.append(best_point)
+        else:
+            # Если не нашли точку, берем следующую
+            for point in points:
+                if point not in centers:
+                    centers.append(point)
+                    break
+    
+    # Назначаем точки ближайшим центрам
+    clusters = [[] for _ in range(n_clusters)]
+    
+    for point in points:
+        # Находим ближайший центр
+        min_dist = float('inf')
+        nearest_idx = 0
+        
+        for i, center in enumerate(centers):
+            dist = WeeklyRouteOptimizer.calculate_distance(
+                point['Широта'], point['Долгота'],
+                center['Широта'], center['Долгота']
+            )
+            if dist < min_dist:
+                min_dist = dist
+                nearest_idx = i
+        
+        clusters[nearest_idx].append(point)
+    
+    return clusters
+
+def create_daily_routes_for_auditor(auditor_points, working_days, auditor_id):
+    """
+    Создает ежедневные маршруты для аудитора
+    auditor_points: список точек аудитора (уже с учетом повторных посещений)
+    working_days: список дат рабочих дней
+    auditor_id: ID аудитора
+    """
+    if not auditor_points or not working_days:
+        return []
+    
+    N = len(auditor_points)  # всего посещений (уже с учетом Кол-во_посещений)
+    K = len(working_days)    # рабочих дней
+    
+    if K == 0:
+        return []
+    
+    # Если дней больше чем посещений
+    if K >= N:
+        # Каждое посещение в свой день
+        routes = []
+        for i in range(N):
+            day_date = working_days[i]
+            route_points = [auditor_points[i]]
+            
+            # Оптимизируем маршрут (даже для одной точки)
+            optimized_route = WeeklyRouteOptimizer.greedy_route(route_points)
+            
+            for point in optimized_route:
+                routes.append({
+                    'ID_Точки': point['ID_Точки'],
+                    'Дата': day_date,
+                    'День_недели': day_date.weekday(),
+                    'Аудитор': auditor_id,
+                    'Широта': point['Широта'],
+                    'Долгота': point['Долгота'],
+                    'Название_Точки': point.get('Название_Точки', point['ID_Точки']),
+                    'Адрес': point.get('Адрес', ''),
+                    'Тип': point.get('Тип', 'Неизвестно')
+                })
+        return routes
+    
+    # Кластеризация точек на K кластеров (дней)
+    try:
+        # Используем K-means если установлен sklearn
+        from sklearn.cluster import KMeans
+        
+        # Подготавливаем координаты для кластеризации
+        coords = np.array([[p['Широта'], p['Долгота']] for p in auditor_points])
+        
+        # Кластеризация
+        kmeans = KMeans(n_clusters=K, random_state=42, n_init=10)
+        labels = kmeans.fit_predict(coords)
+        
+        # Группируем точки по кластерам
+        clusters = [[] for _ in range(K)]
+        for i, (point, label) in enumerate(zip(auditor_points, labels)):
+            clusters[label].append(point)
+        
+    except ImportError:
+        # Простая кластеризация по близости
+        clusters = simple_cluster_points(auditor_points, K)
+    
+    # Строим маршруты для каждого кластера (дня)
+    routes = []
+    for day_idx, (day_date, cluster_points) in enumerate(zip(working_days, clusters)):
+        if not cluster_points:
+            continue
+        
+        # Оптимизируем маршрут внутри кластера
+        optimized_route = WeeklyRouteOptimizer.greedy_route(cluster_points)
+        
+        # Добавляем каждую точку маршрута
+        for point in optimized_route:
+            routes.append({
+                'ID_Точки': point['ID_Точки'],
+                'Дата': day_date,
+                'День_недели': day_date.weekday(),
+                'Аудитор': auditor_id,
+                'Широта': point['Широта'],
+                'Долгота': point['Долгота'],
+                'Название_Точки': point.get('Название_Точки', point['ID_Точки']),
+                'Адрес': point.get('Адрес', ''),
+                'Тип': point.get('Тип', 'Неизвестно')
+            })
+    
+    return routes
+    
+# ==============================================
+# ФУНКЦИИ ДЛЯ СОЗДАНИЯ ВЫХОДНОЙ ТАБЛИЦЫ
+# ==============================================
+def create_weekly_route_schedule(points_df, points_assignment_df, auditors_df, year, quarter):
+    """
+    Создает ежедневные маршруты для аудиторов в формате EasyMerch
     """
     
     if points_df is None or points_df.empty:
@@ -553,12 +755,16 @@ def create_weekly_route_schedule(points_df, points_assignment_df, detailed_plan_
     if points_assignment_df is None or points_assignment_df.empty:
         return pd.DataFrame()
     
-    # 1. Подготавливаем данные
-    # Словарь посещений по точкам
-    visits_per_point = points_df.set_index('ID_Точки')['Кол-во_посещений'].to_dict()
+    # 1. Получаем рабочие дни квартала
+    working_days = get_working_days_for_quarter(year, quarter)
     
-    # Словарь точек по аудиторам
-    auditor_points = {}
+    if not working_days:
+        st.warning(f"⚠️ В {year} квартале {quarter} нет рабочих дней")
+        return pd.DataFrame()
+    
+    all_visits = []
+    
+    # 2. Для каждого аудитора создаем ежедневные маршруты
     for auditor in auditors_df['ID_Сотрудника'].unique():
         # Находим точки этого аудитора
         auditor_point_ids = points_assignment_df[
@@ -567,61 +773,51 @@ def create_weekly_route_schedule(points_df, points_assignment_df, detailed_plan_
         
         if not auditor_point_ids:
             continue
-            
-        # Получаем полные данные точек
-        auditor_data = points_df[
+        
+        # Получаем данные точек
+        auditor_points_data = points_df[
             points_df['ID_Точки'].isin(auditor_point_ids)
         ]
         
-        # Преобразуем в список словарей
-        if not auditor_data.empty:
-            auditor_points[auditor] = auditor_data.to_dict('records')
+        if auditor_points_data.empty:
+            continue
+        
+        # Преобразуем в список словарей с учетом количества посещений
+        auditor_points = []
+        for _, row in auditor_points_data.iterrows():
+            # Учитываем количество посещений за квартал
+            visits_needed = int(row.get('Кол-во_посещений', 1))
+            
+            for visit_num in range(visits_needed):
+                auditor_points.append({
+                    'ID_Точки': row['ID_Точки'],
+                    'Широта': float(row['Широта']),
+                    'Долгота': float(row['Долгота']),
+                    'Название_Точки': row.get('Название_Точки', str(row['ID_Точки'])),
+                    'Адрес': row.get('Адрес', ''),
+                    'Тип': row.get('Тип', 'Неизвестно')
+                })
+        
+        # Создаем ежедневные маршруты
+        daily_visits = create_daily_routes_for_auditor(
+            auditor_points, working_days, auditor
+        )
+        all_visits.extend(daily_visits)
     
-    if not auditor_points:
+    # 3. Преобразуем в DataFrame
+    if not all_visits:
         return pd.DataFrame()
     
-    # 2. Получаем недели квартала
-    weeks_info = get_weeks_in_quarter(year, quarter)
+    results_df = pd.DataFrame(all_visits)
     
-    all_results = []
+    # 4. Группируем по неделям для формата EasyMerch
+    # Добавляем информацию о неделе
+    results_df['Неделя'] = results_df['Дата'].apply(get_iso_week)
+    results_df['Дата_начала_недели'] = results_df['Дата'].apply(
+        lambda d: d - timedelta(days=d.weekday())
+    )
     
-    # 3. Обрабатываем каждую неделю
-    for week_info in weeks_info:
-        week_start = week_info['start_date']
-        week_end = week_info['end_date']
-        iso_week = week_info['iso_week_number']
-        
-        # Даты недели (понедельник-воскресенье)
-        week_dates = [week_start + timedelta(days=i) for i in range(7)]
-        
-        # 4. Оптимизируем для каждого аудитора
-        for auditor, points_list in auditor_points.items():
-            if not points_list:
-                continue
-            
-            # Оптимизируем неделю для аудитора
-            week_visits = WeeklyRouteOptimizer.optimize_week_for_auditor(
-                points_list,
-                visits_per_point,
-                week_dates,
-                auditor
-            )
-            
-            # Добавляем информацию о неделе
-            for visit in week_visits:
-                visit['Неделя'] = iso_week
-                visit['Дата_начала_недели'] = week_start
-                visit['Дата_окончания_недели'] = week_end
-            
-            all_results.extend(week_visits)
-    
-    # 5. Преобразуем в DataFrame
-    if not all_results:
-        return pd.DataFrame()
-    
-    results_df = pd.DataFrame(all_results)
-    
-    # 6. Создаем финальную таблицу в требуемом формате
+    # 5. Создаем финальную таблицу в формате EasyMerch
     final_rows = []
     
     # Группируем по точкам и неделям
@@ -653,7 +849,7 @@ def create_weekly_route_schedule(points_df, points_assignment_df, detailed_plan_
         # Создаем строку
         row = {
             'Address': point_info.get('Адрес', ''),
-            'L1 Name': point_info.get('Название_Точки', point_id),
+            'L1 Name': point_info.get('Название_Точки', str(point_id)),
             'ЧИСЛО визитов в НЕДЕЛЮ': visits_this_week,
             'Login пользователя': auditor,
             'Понедельник': 1 if 0 in days_visited else '',
@@ -2870,6 +3066,7 @@ if st.session_state.plan_calculated:
                   f"{len(st.session_state.polygons) if st.session_state.polygons else 0} полигонов, "
                   f"{len(st.session_state.auditors_df) if st.session_state.auditors_df is not None else 0} аудиторов")
     current_tab += 1
+
 
 
 
