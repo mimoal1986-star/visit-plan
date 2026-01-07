@@ -678,6 +678,122 @@ def create_weekly_route_schedule(points_df, points_assignment_df, detailed_plan_
     final_df = final_df.sort_values(['Login пользователя', 'Дата начала цикла посещения', 'L1 Name'])
     
     return final_df
+
+def create_easymerch_excel(routes_df):
+    """Создает Excel файл в формате EasyMerch с несколькими листами"""
+    import io
+    
+    if routes_df is None or routes_df.empty:
+        return None
+    
+    excel_buffer = io.BytesIO()
+    
+    with pd.ExcelWriter(excel_buffer, engine='openpyxl') as writer:
+        # Лист 1: Основные данные в формате EasyMerch
+        routes_df.to_excel(writer, sheet_name='Маршруты', index=False)
+        
+        # Автонастройка ширины колонок для основного листа
+        worksheet = writer.sheets['Маршруты']
+        for column in worksheet.columns:
+            max_length = 0
+            column_letter = column[0].column_letter
+            for cell in column:
+                try:
+                    if len(str(cell.value)) > max_length:
+                        max_length = len(str(cell.value))
+                except:
+                    pass
+            adjusted_width = min(max_length + 2, 50)
+            worksheet.column_dimensions[column_letter].width = adjusted_width
+        
+        # Лист 2: Инструкция по использованию
+        instructions_data = [
+            ["ПОЛЕ", "ОПИСАНИЕ", "ПРИМЕР", "ОБЯЗАТЕЛЬНОСТЬ"],
+            ["Address", "Полный адрес точки", "ул. Ленина, д. 1, Москва", "Да"],
+            ["L1 Name", "Название торговой точки", 'Магазин "Продукты"', "Да"],
+            ["ЧИСЛО визитов в НЕДЕЛЮ", "Количество визитов в неделю (цифра)", "1, 2, 3", "Да"],
+            ["Login пользователя", "Уникальный ID аудитора", "SOVIAUD10", "Да"],
+            ["Понедельник", "Визит в понедельник (1-да, пусто-нет)", "1", "Нет"],
+            ["Вторник", "Визит во вторник (1-да, пусто-нет)", "", "Нет"],
+            ["Среда", "Визит в среду (1-да, пусто-нет)", "1", "Нет"],
+            ["Четверг", "Визит в четверг (1-да, пусто-нет)", "", "Нет"],
+            ["Пятница", "Визит в пятницу (1-да, пусто-нет)", "1", "Нет"],
+            ["Суббота", "Визит в субботу (1-да, пусто-нет)", "", "Нет"],
+            ["Воскресенье", "Визит в воскресенье (1-да, пусто-нет)", "", "Нет"],
+            ["Цикл посещения", "Номер недели (ISO стандарт)", "15", "Да"],
+            ["Дата начала цикла посещения", "Дата понедельника в формате ГГГГММДД", "20250407", "Да"],
+            ["", "", "", ""],
+            ["ИНСТРУКЦИЯ ПО ИСПОЛЬЗОВАНИЮ:", "", "", ""],
+            ["1. Файл готов для загрузки в EasyMerch", "", "", ""],
+            ["2. Формат даты: YYYYMMDD (например: 20250407)", "", "", ""],
+            ["3. Пустые ячейки в днях недели = нет визита", "", "", ""],
+            ["4. Ячейки с цифрой 1 = визит запланирован", "", "", ""],
+            ["5. Не изменяйте названия колонок", "", "", ""]
+        ]
+        
+        instructions_df = pd.DataFrame(instructions_data[1:], columns=instructions_data[0])
+        instructions_df.to_excel(writer, sheet_name='Инструкция', index=False)
+        
+        # Автонастройка ширины для инструкции
+        worksheet = writer.sheets['Инструкция']
+        worksheet.column_dimensions['A'].width = 25
+        worksheet.column_dimensions['B'].width = 40
+        worksheet.column_dimensions['C'].width = 25
+        worksheet.column_dimensions['D'].width = 15
+        
+        # Лист 3: Сводка и статистика
+        summary_data = {
+            'Статистика': [
+                'Всего записей в плане',
+                'Уникальных аудиторов',
+                'Уникальных торговых точек',
+                'Общее количество визитов в неделю',
+                'Количество недель в плане',
+                'Первая неделя',
+                'Последняя неделя',
+                'Среднее визитов на аудитора',
+                'Дата создания отчета'
+            ],
+            'Значение': [
+                len(routes_df),
+                routes_df['Login пользователя'].nunique(),
+                routes_df['L1 Name'].nunique(),
+                routes_df['ЧИСЛО визитов в НЕДЕЛЮ'].sum(),
+                routes_df['Цикл посещения'].nunique(),
+                routes_df['Цикл посещения'].min() if not routes_df.empty else '-',
+                routes_df['Цикл посещения'].max() if not routes_df.empty else '-',
+                round(routes_df['ЧИСЛО визитов в НЕДЕЛЮ'].sum() / routes_df['Login пользователя'].nunique(), 1) 
+                if routes_df['Login пользователя'].nunique() > 0 else 0,
+                datetime.now().strftime('%d.%m.%Y %H:%M')
+            ]
+        }
+        
+        summary_df = pd.DataFrame(summary_data)
+        summary_df.to_excel(writer, sheet_name='Сводка', index=False)
+        
+        # Автонастройка ширины для сводки
+        worksheet = writer.sheets['Сводка']
+        worksheet.column_dimensions['A'].width = 35
+        worksheet.column_dimensions['B'].width = 20
+        
+        # Лист 4: Распределение по аудиторам (дополнительно)
+        if 'Login пользователя' in routes_df.columns:
+            auditor_stats = routes_df.groupby('Login пользователя').agg({
+                'L1 Name': 'nunique',
+                'ЧИСЛО визитов в НЕДЕЛЮ': 'sum',
+                'Цикл посещения': 'nunique'
+            }).reset_index()
+            
+            auditor_stats.columns = ['Аудитор', 'Уникальных точек', 'Всего визитов', 'Недель в работе']
+            auditor_stats = auditor_stats.sort_values('Всего визитов', ascending=False)
+            auditor_stats.to_excel(writer, sheet_name='Аудиторы', index=False)
+            
+            # Автонастройка ширины
+            worksheet = writer.sheets['Аудиторы']
+            for i, column in enumerate(['A', 'B', 'C', 'D'], 1):
+                worksheet.column_dimensions[column].width = 20
+    
+    return excel_buffer.getvalue()
                                      
 # ==============================================
 # ФУНКЦИИ ДЛЯ ГЕНЕРАЦИИ ПОЛИГОНОВ И РАСПРЕДЕЛЕНИЯ
@@ -2303,8 +2419,9 @@ if st.session_state.plan_calculated:
                             # Выгрузка данных
                             st.markdown("---")
                             st.subheader("💾 Выгрузка данных")
+
                             
-                            # Теперь 3 колонки вместо 2
+                            # Теперь 3 колонки: фильтр, все данные, EasyMerch Excel
                             col1, col2, col3 = st.columns(3)
                             
                             with col1:
@@ -2321,12 +2438,13 @@ if st.session_state.plan_calculated:
                                             data=excel_data,
                                             file_name=f"план_посещений_{year}_Q{quarter}_фильтр.xlsx",
                                             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                                            use_container_width=True
+                                            use_container_width=True,
+                                            help="Только отфильтрованные данные"
                                         )
                                     except Exception as e:
                                         st.error(f"❌ Ошибка Excel: {str(e)}")
                                 else:
-                                    st.info("Нет данных для выгрузки")
+                                    st.info("Нет данных")
                                     st.download_button(
                                         label="📥 Скачать Excel (фильтр)",
                                         data=b"",
@@ -2350,12 +2468,13 @@ if st.session_state.plan_calculated:
                                             data=excel_data,
                                             file_name=f"план_посещений_{year}_Q{quarter}_все.xlsx",
                                             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                                            use_container_width=True
+                                            use_container_width=True,
+                                            help="Все данные плана посещений"
                                         )
                                     except Exception as e:
                                         st.error(f"❌ Ошибка Excel: {str(e)}")
                                 else:
-                                    st.info("Нет данных для выгрузки")
+                                    st.info("Нет данных")
                                     st.download_button(
                                         label="📥 Скачать Excel (все данные)",
                                         data=b"",
@@ -2366,42 +2485,40 @@ if st.session_state.plan_calculated:
                                     )
                             
                             with col3:
-                                # Выгрузка для EasyMerch
+                                # Выгрузка для EasyMerch в Excel
                                 if 'routes_df' in st.session_state and st.session_state.routes_df is not None:
                                     routes_df = st.session_state.routes_df
                                     
                                     if routes_df is not None and not routes_df.empty:
-                                        # Кнопка скачивания CSV для EasyMerch
-                                        csv_data = routes_df.to_csv(index=False, sep=';').encode('utf-8')
-                                        
-                                        st.download_button(
-                                            label="📊 Выгрузка для EasyMerch",
-                                            data=csv_data,
-                                            file_name=f"easymerch_маршруты_{year}_Q{quarter}.csv",
-                                            mime="text/csv",
-                                            use_container_width=True,
-                                            help="Формат: Address | L1 Name | ЧИСЛО визитов в НЕДЕЛЮ | Login | Пн | Вт | Ср | Чт | Пт | Сб | Вс | Цикл | Дата начала"
-                                        )
-                                        
-                                        # Информация о формате
-                                        with st.expander("ℹ️ Формат EasyMerch", expanded=False):
-                                            st.markdown("""
-                                            **Структура файла:**
-                                            - Address: Адрес точки
-                                            - L1 Name: Название точки  
-                                            - ЧИСЛО визитов в НЕДЕЛЮ: Сколько раз посещать
-                                            - Login пользователя: ID аудитора
-                                            - Пн-Вс: 1 если визит в этот день
-                                            - Цикл посещения: Номер недели
-                                            - Дата начала цикла: Дата понедельника (YYYYMMDD)
-                                            """)
+                                        with st.spinner("🔄 Подготовка Excel файла..."):
+                                            try:
+                                                # Создаем Excel файл
+                                                excel_data = create_easymerch_excel(routes_df)
+                                                
+                                                if excel_data:
+                                                    st.download_button(
+                                                        label="📊 EasyMerch (Excel)",
+                                                        data=excel_data,
+                                                        file_name=f"easymerch_маршруты_{year}_Q{quarter}.xlsx",
+                                                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                                                        use_container_width=True,
+                                                        help="Полный отчет для EasyMerch с инструкцией и статистикой"
+                                                    )
+                                                    
+                                                    # Информация о файле
+                                                    st.caption(f"📁 {len(routes_df)} записей, {routes_df['Login пользователя'].nunique()} аудиторов")
+                                                else:
+                                                    st.error("❌ Не удалось создать файл")
+                                                    
+                                            except Exception as e:
+                                                st.error(f"❌ Ошибка создания Excel: {str(e)}")
                                     else:
                                         st.info("Маршруты не рассчитаны")
                                         st.download_button(
-                                            label="📊 Выгрузка для EasyMerch",
+                                            label="📊 EasyMerch (Excel)",
                                             data=b"",
-                                            file_name="маршруты.csv",
-                                            mime="text/csv",
+                                            file_name="маршруты.xlsx",
+                                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                                             use_container_width=True,
                                             disabled=True,
                                             help="Сначала рассчитайте маршруты"
@@ -2409,14 +2526,43 @@ if st.session_state.plan_calculated:
                                 else:
                                     st.info("Маршруты не рассчитаны")
                                     st.download_button(
-                                        label="📊 Выгрузка для EasyMerch",
+                                        label="📊 EasyMerch (Excel)",
                                         data=b"",
-                                        file_name="маршруты.csv",
-                                        mime="text/csv",
+                                        file_name="маршруты.xlsx",
+                                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                                         use_container_width=True,
                                         disabled=True,
                                         help="Сначала рассчитайте маршруты"
                                     )
+                            
+                            # Информация о формате EasyMerch Excel
+                            st.markdown("---")
+                            with st.expander("📋 Формат EasyMerch Excel", expanded=False):
+                                st.markdown("""
+                                **Excel файл содержит 4 листа:**
+                                
+                                ### 📄 **1. Маршруты**
+                                Основные данные в формате EasyMerch для импорта:
+                                - Address | L1 Name | ЧИСЛО визитов в НЕДЕЛЮ | Login пользователя
+                                - Пн | Вт | Ср | Чт | Пт | Сб | Вс
+                                - Цикл посещения | Дата начала цикла посещения
+                                
+                                ### 📖 **2. Инструкция**
+                                Подробное описание всех полей с примерами заполнения
+                                
+                                ### 📊 **3. Сводка**
+                                Статистика по всему плану визитов
+                                
+                                ### 👥 **4. Аудиторы**
+                                Распределение нагрузки по сотрудникам
+                                
+                                ---
+                                **🔥 Особенности:**
+                                - Автоподбор ширины колонок
+                                - Готов к печати
+                                - Сохраняет форматирование
+                                - Поддерживает русские названия колонок
+                                """)
         
         # ВКЛАДКА 3: Диаграммы
         if "📈 Диаграммы" in available_tabs:
@@ -2724,6 +2870,7 @@ if st.session_state.plan_calculated:
                   f"{len(st.session_state.polygons) if st.session_state.polygons else 0} полигонов, "
                   f"{len(st.session_state.auditors_df) if st.session_state.auditors_df is not None else 0} аудиторов")
     current_tab += 1
+
 
 
 
