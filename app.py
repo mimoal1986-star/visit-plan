@@ -659,160 +659,66 @@ def simple_cluster_points(points, n_clusters):
     
     return clusters
 
-def create_daily_routes_for_auditor(auditor_points, working_days, auditor_id):
+def create_daily_routes_with_sequence(auditor_points, working_days, auditor_id):
     """
-    Создает ежедневные маршруты для аудитора с БАЛАНСИРОВКОЙ
+    Создает последовательные ежедневные маршруты
+    Точки распределяются по дням в географическом порядке (зигзаг)
     """
     if not auditor_points or not working_days:
         return []
     
-    N = len(auditor_points)  # всего посещений
-    K = len(working_days)    # рабочих дней
+    # 1. Сортируем точки: сначала широта (север → юг), затем долгота (запад → восток)
+    sorted_points = sorted(auditor_points,
+                          key=lambda p: (-p['Широта'], p['Долгота']))  # Север → Юг, Запад → Восток
     
-    if K == 0:
-        return []
+    # 2. Распределяем по дням
+    K = len(working_days)
+    daily_clusters = []
     
-    # Целевое количество точек в день (округляем вверх)
-    target_per_day = math.ceil(N / K)
+    # Делим на равные части
+    for i in range(K):
+        daily_clusters.append([])
     
-    # Если дней больше чем посещений
-    if K >= N:
-        # Каждое посещение в свой день
-        routes = []
-        for i in range(min(N, K)):  # Исправлено: min(N, K)
-            day_date = working_days[i]
-            route_points = [auditor_points[i]]
-            
-            optimized_route = WeeklyRouteOptimizer.greedy_route(route_points)
-            
-            for point in optimized_route:
-                routes.append({
-                    'ID_Точки': point['ID_Точки'],
-                    'Дата': day_date,
-                    'День_недели': day_date.weekday(),
-                    'Аудитор': auditor_id,
-                    'Широта': point['Широта'],
-                    'Долгота': point['Долгота'],
-                    'Название_Точки': point.get('Название_Точки', point['ID_Точки']),
-                    'Адрес': point.get('Адрес', ''),
-                    'Тип': point.get('Тип', 'Неизвестно')
-                })
-        return routes
+    # Распределяем точки по дням (как карты в колоду)
+    for idx, point in enumerate(sorted_points):
+        day_index = idx % K
+        daily_clusters[day_index].append(point)
     
-    # 1. Сначала кластеризуем на MORE кластеров, чем дней
-    # Это даст мелкие компактные группы
-    try:
-        from sklearn.cluster import KMeans
-        # Создаем в 2 раза больше кластеров чем дней
-        n_initial_clusters = min(N, K * 2)
-        
-        coords = np.array([[p['Широта'], p['Долгота']] for p in auditor_points])
-        kmeans = KMeans(n_clusters=n_initial_clusters, random_state=42, n_init=10)
-        labels = kmeans.fit_predict(coords)
-        
-        # Группируем по начальным кластерам
-        initial_clusters = [[] for _ in range(n_initial_clusters)]
-        for i, (point, label) in enumerate(zip(auditor_points, labels)):
-            if 0 <= label < n_initial_clusters:
-                initial_clusters[label].append(point)
-        
-    except ImportError:
-        # Простая кластеризация
-        n_initial_clusters = min(N, K * 2)
-        initial_clusters = simple_cluster_points(auditor_points, n_initial_clusters)
-    
-    # Убираем полностью пустые кластеры
-    initial_clusters = [c for c in initial_clusters if len(c) > 0]
-    
-    if not initial_clusters:
-        return []
-    
-    # 2. Теперь объединяем мелкие кластеры в K дней с балансировкой
-    # Сортируем кластеры по размеру (от маленьких к большим)
-    initial_clusters.sort(key=len)
-    
-    # Создаем финальные кластеры для дней
-    daily_clusters = [[] for _ in range(K)]
-    cluster_sizes = [0] * K
-    
-    # Распределяем мелкие кластеры по дням
-    for cluster in initial_clusters:
-        if not cluster:
-            continue
-            
-        # Находим день с наименьшим количеством точек
-        # Если несколько дней с одинаковым min, берем первый
-        min_size = min(cluster_sizes)
-        min_size_idx = cluster_sizes.index(min_size)
-        
-        # Добавляем весь кластер в этот день
-        daily_clusters[min_size_idx].extend(cluster)
-        cluster_sizes[min_size_idx] += len(cluster)
-    
-    # 3. Если есть очень большие кластеры, разбиваем их
-    # Перераспределяем точки для более равномерного распределения
-    max_iterations = 5
-    for iteration in range(max_iterations):
-        balanced = True
-        
-        for day_idx in range(K):
-            current_size = cluster_sizes[day_idx]
-            
-            # Проверяем отклонение от целевого размера
-            if abs(current_size - target_per_day) > 3:  # Допуск ±3 точки
-                balanced = False
-                
-                if current_size > target_per_day + 3:
-                    excess = current_size - target_per_day
-                    
-                    # Находим точки, которые можно перенести
-                    if excess > 0 and len(daily_clusters[day_idx]) > excess:
-                        # Вычисляем центр кластера
-                        if daily_clusters[day_idx]:
-                            center_lat = np.mean([p['Широта'] for p in daily_clusters[day_idx]])
-                            center_lon = np.mean([p['Долгота'] for p in daily_clusters[day_idx]])
-                            
-                            # Находим самые дальние точки
-                            points_with_dist = []
-                            for point in daily_clusters[day_idx]:
-                                dist = WeeklyRouteOptimizer.calculate_distance(
-                                    point['Широта'], point['Долгота'],
-                                    center_lat, center_lon
-                                )
-                                points_with_dist.append((point, dist))
-                            
-                            # Сортируем по расстоянию (от дальних к ближним)
-                            points_with_dist.sort(key=lambda x: x[1], reverse=True)
-                            
-                            # Переносим самые дальние точки
-                            points_to_move = [p for p, _ in points_with_dist[:excess]]
-                            daily_clusters[day_idx] = [p for p, _ in points_with_dist[excess:]]
-                            cluster_sizes[day_idx] -= excess
-                            
-                            # Распределяем перенесенные точки по дням с наименьшей нагрузкой
-                            for point in points_to_move:
-                                min_size = min(cluster_sizes)
-                                min_size_idx = cluster_sizes.index(min_size)
-                                daily_clusters[min_size_idx].append(point)
-                                cluster_sizes[min_size_idx] += 1
-        
-        if balanced:
-            break
-    
-    # 4. Строим маршруты для каждого дня
+    # 3. Оптимизируем маршрут внутри каждого дня
     routes = []
     for day_idx, (day_date, cluster_points) in enumerate(zip(working_days, daily_clusters)):
         if not cluster_points:
             continue
         
-        # Оптимизируем маршрут
+        # Сортируем точки внутри дня для лучшего маршрута
+        if len(cluster_points) > 1:
+            # Находим центр
+            center_lat = sum(p['Широта'] for p in cluster_points) / len(cluster_points)
+            center_lon = sum(p['Долгота'] for p in cluster_points) / len(cluster_points)
+            
+            # Сортируем по удалению от центра (наружу → внутрь)
+            cluster_points.sort(
+                key=lambda p: WeeklyRouteOptimizer.calculate_distance(
+                    p['Широта'], p['Долгота'], center_lat, center_lon
+                ),
+                reverse=True
+            )
+        
+        # Строим маршрут
         optimized_route = WeeklyRouteOptimizer.greedy_route(cluster_points)
         
+        # Обработка даты
+        if isinstance(day_date, date) and not isinstance(day_date, datetime):
+            visit_datetime = datetime.combine(day_date, datetime.min.time())
+        else:
+            visit_datetime = day_date
+        
+        # Добавляем в результат
         for point in optimized_route:
             routes.append({
                 'ID_Точки': point['ID_Точки'],
-                'Дата': day_date,
-                'День_недели': day_date.weekday(),
+                'Дата': visit_datetime,
+                'День_недели': visit_datetime.weekday(),
                 'Аудитор': auditor_id,
                 'Широта': point['Широта'],
                 'Долгота': point['Долгота'],
@@ -3159,6 +3065,7 @@ if st.session_state.plan_calculated:
                   f"{len(st.session_state.polygons) if st.session_state.polygons else 0} полигонов, "
                   f"{len(st.session_state.auditors_df) if st.session_state.auditors_df is not None else 0} аудиторов")
     current_tab += 1
+
 
 
 
