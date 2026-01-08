@@ -855,7 +855,7 @@ def balance_clusters_simple(clusters, target_k):
         return [[] for _ in range(target_k)]
     
     # Сортируем по географии
-    sorted_points = sorted(all_points, key=lambda p: (-p['Широта'], p['Долгота']))
+    sorted_points = sort_points_spatially(points)
     
     # Распределяем равномерно
     balanced = [[] for _ in range(target_k)]
@@ -3253,6 +3253,7 @@ if st.session_state.plan_calculated:
                   f"{len(st.session_state.polygons) if st.session_state.polygons else 0} полигонов, "
                   f"{len(st.session_state.auditors_df) if st.session_state.auditors_df is not None else 0} аудиторов")
     current_tab += 1
+
 
 
 
