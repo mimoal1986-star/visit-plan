@@ -829,8 +829,26 @@ def simple_geographic_distribution(points, working_days, auditor_id):
     
     K = len(working_days)
     
-    # Сортируем точки
-    sorted_points = sorted(points, key=lambda p: (-p['Широта'], p['Долгота']))
+# УЛУЧШЕННАЯ СОРТИРОВКА ДЛЯ КОМПАКТНЫХ ЗОН
+    def spatial_sort_key(point):
+        """
+        Сортировка создающая КВАДРАТНЫЕ зоны:
+        1. Группируем точки в "ряды" по широте (~1.1 км)
+        2. Внутри ряда сортируем по долготе
+        """
+        lat = point['Широта']
+        lon = point['Долгота']
+        
+        # Группируем в полосы по 0.01° (~1.1 км в РФ)
+        # Это создаст горизонтальные полосы на карте
+        lat_row = int(lat / 0.01)
+        
+        # Сортируем: сначала по рядам (север→юг), 
+        # потом внутри ряда (запад→восток)
+        return (-lat_row, lon)
+    
+    # Используем улучшенную сортировку
+    sorted_points = sorted(points, key=spatial_sort_key)
     
     # Делим на части
     daily_clusters = []
@@ -3210,6 +3228,7 @@ if st.session_state.plan_calculated:
                   f"{len(st.session_state.polygons) if st.session_state.polygons else 0} полигонов, "
                   f"{len(st.session_state.auditors_df) if st.session_state.auditors_df is not None else 0} аудиторов")
     current_tab += 1
+
 
 
 
