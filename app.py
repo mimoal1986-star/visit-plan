@@ -15,18 +15,9 @@ from datetime import datetime, date, timedelta
 import calendar
 import json
 import base64
-from typing import Dict, List, Tuple, Optional,Callable, Any
+from typing import Dict, List, Tuple, Optional, Any, Callable
 import warnings
 warnings.filterwarnings('ignore')
-
-
-# Глобальная переменная как в основном коде
-SCIPY_AVAILABLE = False
-try:
-    from scipy.spatial import ConvexHull
-    SCIPY_AVAILABLE = True
-except ImportError:
-    SCIPY_AVAILABLE = False
 
 # ВИЗУАЛИЗАЦИЯ
 import plotly.express as px
@@ -126,8 +117,9 @@ with st.sidebar:
     
     *Настройки сохраняются автоматически*
     """)
-    st.markdown("---")
 
+    st.markdown("---")
+    
     st.subheader("🎯 Алгоритм разбиения")
     use_enhanced_split = st.checkbox(
         "Использовать улучшенное разбиение по неделям", 
@@ -912,6 +904,9 @@ def simple_geographic_distribution(points, working_days, auditor_id):
 # ==============================================
 # ФУНКЦИИ ДЛЯ СОЗДАНИЯ ВЫХОДНОЙ ТАБЛИЦЫ
 # ==============================================
+# ==============================================
+# ОБНОВЛЕННАЯ ФУНКЦИЯ create_weekly_route_schedule
+# ==============================================
 
 def create_weekly_route_schedule(points_df, points_assignment_df, auditors_df, 
                                  year, quarter, use_enhanced_split=False):
@@ -1203,6 +1198,121 @@ def create_weekly_route_schedule(points_df, points_assignment_df, auditors_df,
     
     return final_df
 
+def create_easymerch_excel(routes_df):
+    """Создает Excel файл в формате EasyMerch с несколькими листами"""
+    import io
+    
+    if routes_df is None or routes_df.empty:
+        return None
+    
+    excel_buffer = io.BytesIO()
+    
+    with pd.ExcelWriter(excel_buffer, engine='openpyxl') as writer:
+        # Лист 1: Основные данные в формате EasyMerch
+        routes_df.to_excel(writer, sheet_name='Маршруты', index=False)
+        
+        # Автонастройка ширины колонок для основного листа
+        worksheet = writer.sheets['Маршруты']
+        for column in worksheet.columns:
+            max_length = 0
+            column_letter = column[0].column_letter
+            for cell in column:
+                try:
+                    if len(str(cell.value)) > max_length:
+                        max_length = len(str(cell.value))
+                except:
+                    pass
+            adjusted_width = min(max_length + 2, 50)
+            worksheet.column_dimensions[column_letter].width = adjusted_width
+        
+        # Лист 2: Инструкция по использованию
+        instructions_data = [
+            ["ПОЛЕ", "ОПИСАНИЕ", "ПРИМЕР", "ОБЯЗАТЕЛЬНОСТЬ"],
+            ["Address", "Полный адрес точки", "ул. Ленина, д. 1, Москва", "Да"],
+            ["L1 Name", "Название торговой точки", 'Магазин "Продукты"', "Да"],
+            ["ЧИСЛО визитов в НЕДЕЛЮ", "Количество визитов в неделю (цифра)", "1, 2, 3", "Да"],
+            ["Login пользователя", "Уникальный ID аудитора", "SOVIAUD10", "Да"],
+            ["Понедельник", "Визит в понедельник (1-да, пусто-нет)", "1", "Нет"],
+            ["Вторник", "Визит во вторник (1-да, пусто-нет)", "", "Нет"],
+            ["Среда", "Визит в среду (1-да, пусто-нет)", "1", "Нет"],
+            ["Четверг", "Визит в четверг (1-да, пусто-нет)", "", "Нет"],
+            ["Пятница", "Визит в пятницу (1-да, пусто-нет)", "1", "Нет"],
+            ["Суббота", "Визит в субботу (1-да, пусто-нет)", "", "Нет"],
+            ["Воскресенье", "Визит в воскресенье (1-да, пусто-нет)", "", "Нет"],
+            ["Цикл посещения", "Номер недели (ISO стандарт)", "15", "Да"],
+            ["Дата начала цикла посещения", "Дата понедельника в формате ГГГГММДД", "20250407", "Да"],
+            ["", "", "", ""],
+            ["ИНСТРУКЦИЯ ПО ИСПОЛЬЗОВАНИЮ:", "", "", ""],
+            ["1. Файл готов для загрузки в EasyMerch", "", "", ""],
+            ["2. Формат даты: YYYYMMDD (например: 20250407)", "", "", ""],
+            ["3. Пустые ячейки в днях недели = нет визита", "", "", ""],
+            ["4. Ячейки с цифрой 1 = визит запланирован", "", "", ""],
+            ["5. Не изменяйте названия колонок", "", "", ""]
+        ]
+        
+        instructions_df = pd.DataFrame(instructions_data[1:], columns=instructions_data[0])
+        instructions_df.to_excel(writer, sheet_name='Инструкция', index=False)
+        
+        # Автонастройка ширины для инструкции
+        worksheet = writer.sheets['Инструкция']
+        worksheet.column_dimensions['A'].width = 25
+        worksheet.column_dimensions['B'].width = 40
+        worksheet.column_dimensions['C'].width = 25
+        worksheet.column_dimensions['D'].width = 15
+        
+        # Лист 3: Сводка и статистика
+        summary_data = {
+            'Статистика': [
+                'Всего записей в плане',
+                'Уникальных аудиторов',
+                'Уникальных торговых точек',
+                'Общее количество визитов в неделю',
+                'Количество недель в плане',
+                'Первая неделя',
+                'Последняя неделя',
+                'Среднее визитов на аудитора',
+                'Дата создания отчета'
+            ],
+            'Значение': [
+                len(routes_df),
+                routes_df['Login пользователя'].nunique(),
+                routes_df['L1 Name'].nunique(),
+                routes_df['ЧИСЛО визитов в НЕДЕЛЮ'].sum(),
+                routes_df['Цикл посещения'].nunique(),
+                routes_df['Цикл посещения'].min() if not routes_df.empty else '-',
+                routes_df['Цикл посещения'].max() if not routes_df.empty else '-',
+                round(routes_df['ЧИСЛО визитов в НЕДЕЛЮ'].sum() / routes_df['Login пользователя'].nunique(), 1) 
+                if routes_df['Login пользователя'].nunique() > 0 else 0,
+                datetime.now().strftime('%d.%m.%Y %H:%M')
+            ]
+        }
+        
+        summary_df = pd.DataFrame(summary_data)
+        summary_df.to_excel(writer, sheet_name='Сводка', index=False)
+        
+        # Автонастройка ширины для сводки
+        worksheet = writer.sheets['Сводка']
+        worksheet.column_dimensions['A'].width = 35
+        worksheet.column_dimensions['B'].width = 20
+        
+        # Лист 4: Распределение по аудиторам (дополнительно)
+        if 'Login пользователя' in routes_df.columns:
+            auditor_stats = routes_df.groupby('Login пользователя').agg({
+                'L1 Name': 'nunique',
+                'ЧИСЛО визитов в НЕДЕЛЮ': 'sum',
+                'Цикл посещения': 'nunique'
+            }).reset_index()
+            
+            auditor_stats.columns = ['Аудитор', 'Уникальных точек', 'Всего визитов', 'Недель в работе']
+            auditor_stats = auditor_stats.sort_values('Всего визитов', ascending=False)
+            auditor_stats.to_excel(writer, sheet_name='Аудиторы', index=False)
+            
+            # Автонастройка ширины
+            worksheet = writer.sheets['Аудиторы']
+            for i, column in enumerate(['A', 'B', 'C', 'D'], 1):
+                worksheet.column_dimensions[column].width = 20
+    
+    return excel_buffer.getvalue()
                                      
 # ==============================================
 # ФУНКЦИИ ДЛЯ ГЕНЕРАЦИИ ПОЛИГОНОВ И РАСПРЕДЕЛЕНИЯ
@@ -2482,12 +2592,12 @@ if calculate_button:
             try:
                 # Создаем таблицу с маршрутами
                 routes_df = create_weekly_route_schedule(
-                    points_df, 
-                    points_assignment_df, 
-                    auditors_df, 
-                    year, 
-                    quarter, 
-                    use_enhanced_split=use_enhanced_split  # ← добавить этот параметр
+                    points_df,
+                    points_assignment_df,
+                    auditors_df,  # ← ТОЛЬКО 5 АРГУМЕНТОВ!
+                    year,
+                    quarter,
+                    use_enhanced_split=use_enhanced_split
                 )
                 
                 if not routes_df.empty:
@@ -3280,13 +3390,22 @@ if st.session_state.plan_calculated:
         st.caption(f"📊 Данные: {len(st.session_state.points_df) if st.session_state.points_df is not None else 0} точек, "
                   f"{len(st.session_state.polygons) if st.session_state.polygons else 0} полигонов, "
                   f"{len(st.session_state.auditors_df) if st.session_state.auditors_df is not None else 0} аудиторов")
-    current_tab += 1
-
-# ==============================================
+    # ==============================================
 # ИСПРАВЛЕННЫЙ МОДУЛЬ: РАЗБИЕНИЕ ПОЛИГОНА ПО НЕДЕЛЯМ (БЕЗ STREAMLIT)
 # ==============================================
 
+import numpy as np
+import math
+from typing import Dict, List, Tuple, Optional, Callable
+import warnings
 
+# Глобальная переменная как в основном коде
+SCIPY_AVAILABLE = False
+try:
+    from scipy.spatial import ConvexHull
+    SCIPY_AVAILABLE = True
+except ImportError:
+    SCIPY_AVAILABLE = False
 
 def split_polygon_by_weeks(polygon_coords: List[List[float]], 
                           points_coords: List[List[float]], 
@@ -3706,8 +3825,8 @@ def fallback_geographic_split(points_coords: List[List[float]],
 
 
 
-
-
+    
+    current_tab += 1
 
 
 
