@@ -904,6 +904,436 @@ def simple_geographic_distribution(points, working_days, auditor_id):
 # ==============================================
 # ФУНКЦИИ ДЛЯ СОЗДАНИЯ ВЫХОДНОЙ ТАБЛИЦЫ
 # ==============================================
+
+# ==============================================
+# ИСПРАВЛЕННЫЙ МОДУЛЬ: РАЗБИЕНИЕ ПОЛИГОНА ПО НЕДЕЛЯМ (БЕЗ STREAMLIT)
+# ==============================================
+
+# Добавьте эти импорты в НАЧАЛО модуля:
+import numpy as np
+from typing import Dict, List, Tuple, Optional, Callable
+import warnings
+
+
+def detect_outliers_simple(points: np.ndarray, centroid: np.ndarray, 
+                          threshold_multiplier: float = 2.0) -> Tuple[List[int], List[int]]:
+    """Простой метод определения выбросов по расстоянию до центроида"""
+    if len(points) == 0:
+        return [], []
+    
+    try:
+        # Вычисляем расстояния до центроида
+        distances = np.sqrt(np.sum((points - centroid) ** 2, axis=1))
+        
+        # Среднее расстояние + порог
+        mean_dist = np.mean(distances)
+        std_dist = np.std(distances) if len(distances) > 1 else 0
+        
+        if std_dist == 0:
+            # Все точки на одинаковом расстоянии
+            return list(range(len(points))), []
+        
+        threshold = mean_dist + threshold_multiplier * std_dist
+        
+        normal_indices = np.where(distances <= threshold)[0].tolist()
+        outlier_indices = np.where(distances > threshold)[0].tolist()
+        
+        return normal_indices, outlier_indices
+    except:
+        # Если что-то пошло не так, считаем все точки нормальными
+        return list(range(len(points))), []
+
+
+def calculate_weekly_targets_simple(total_points: int, num_weeks: int, 
+                                   coefficients: List[float]) -> List[int]:
+    """Упрощенный расчет целевого количества точек"""
+    if total_points <= 0 or num_weeks <= 0:
+        return []
+    
+    if len(coefficients) < 4:
+        coefficients = [1.0] * 4
+    
+    # Простая логика распределения
+    if num_weeks <= 4:
+        # Используем коэффициенты напрямую
+        normalized = [c / sum(coefficients[:num_weeks]) for c in coefficients[:num_weeks]]
+    else:
+        # Распределяем коэффициенты циклически
+        weekly_coeffs = []
+        for i in range(num_weeks):
+            weekly_coeffs.append(coefficients[i % 4])
+        total_coeff = sum(weekly_coeffs)
+        normalized = [c / total_coeff for c in weekly_coeffs]
+    
+    # Рассчитываем цели
+    targets = []
+    remaining = total_points
+    
+    for i in range(num_weeks):
+        if i == num_weeks - 1:
+            target = remaining  # Последняя неделя получает остаток
+        else:
+            target = max(1, int(round(total_points * normalized[i])))
+            remaining -= target
+        
+        targets.append(target)
+    
+    # Корректируем если нужно
+    total_assigned = sum(targets)
+    if total_assigned != total_points:
+        diff = total_points - total_assigned
+        if diff != 0 and targets:
+            targets[-1] += diff
+    
+    return targets
+
+
+def initialize_clusters_simple(polygon: np.ndarray, num_clusters: int, 
+                              points: np.ndarray) -> np.ndarray:
+    """Простая инициализация центров кластеров"""
+    if len(points) == 0:
+        return np.array([])
+    
+    if len(points) <= num_clusters:
+        return points.copy()
+    
+    try:
+        # Пробуем использовать вершины полигона если возможно
+        if len(polygon) >= num_clusters:
+            # Выбираем равномерно распределенные точки полигона
+            indices = np.linspace(0, len(polygon) - 1, num_clusters, dtype=int)
+            return polygon[indices]
+        else:
+            # Случайные точки из данных
+            np.random.seed(42)  # Для воспроизводимости
+            indices = np.random.choice(len(points), num_clusters, replace=False)
+            return points[indices]
+    except:
+        # Fallback: первые num_clusters точек
+        return points[:num_clusters]
+
+
+def simple_balanced_kmeans(points: np.ndarray, point_ids: List[str], 
+                          num_clusters: int, initial_centers: np.ndarray,
+                          weekly_targets: List[int], logger: Callable) -> Tuple[Dict, Dict]:
+    """Упрощенный балансированный k-means"""
+    n_points = len(points)
+    
+    if n_points == 0 or num_clusters <= 0:
+        return {}, {}
+    
+    # Инициализация центров
+    centers = initial_centers.copy()
+    if len(centers) < num_clusters:
+        # Дополняем если нужно
+        needed = num_clusters - len(centers)
+        if n_points >= needed:
+            indices = np.random.choice(n_points, needed, replace=False)
+            centers = np.vstack([centers, points[indices]])
+    
+    # Простой k-means
+    for iteration in range(30):  # Максимум 30 итераций
+        # Шаг 1: Назначение точек по ближайшему центру
+        assignments = np.zeros(n_points, dtype=int)
+        for i, point in enumerate(points):
+            distances = np.sqrt(np.sum((centers - point) ** 2, axis=1))
+            assignments[i] = np.argmin(distances)
+        
+        # Шаг 2: Балансировка
+        assignments = simple_balance_assignments(assignments, weekly_targets, points, centers)
+        
+        # Шаг 3: Обновление центров
+        new_centers = centers.copy()
+        for i in range(num_clusters):
+            cluster_points = points[assignments == i]
+            if len(cluster_points) > 0:
+                new_centers[i] = np.mean(cluster_points, axis=0)
+            else:
+                # Если кластер пуст, перемещаем центр к случайной точке
+                idx = np.random.randint(0, n_points)
+                new_centers[i] = points[idx]
+        
+        # Шаг 4: Проверка сходимости
+        if np.max(np.sqrt(np.sum((centers - new_centers) ** 2, axis=1))) < 0.001:
+            break
+        
+        centers = new_centers
+    
+    # Формируем результат
+    week_assignments = {}
+    week_clusters = {}
+    
+    for week in range(num_clusters):
+        week_mask = assignments == week
+        week_point_ids = [point_ids[i] for i in range(n_points) if week_mask[i]]
+        
+        if week_point_ids:
+            week_points = points[week_mask]
+            week_assignments[week] = week_point_ids
+            
+            # Вычисляем центроид
+            centroid = np.mean(week_points, axis=0) if len(week_points) > 0 else centers[week]
+            
+            # Вычисляем компактность (среднее расстояние до центроида)
+            if len(week_points) > 0:
+                distances = np.sqrt(np.sum((week_points - centroid) ** 2, axis=1))
+                compactness = np.mean(distances)
+            else:
+                compactness = 0
+            
+            week_clusters[week] = {
+                'centroid': centroid.tolist(),
+                'size': len(week_points),
+                'compactness': float(compactness)
+            }
+    
+    return week_assignments, week_clusters
+
+
+def simple_balance_assignments(assignments: np.ndarray, targets: List[int],
+                              points: np.ndarray, centers: np.ndarray) -> np.ndarray:
+    """Простая балансировка назначений"""
+    n_clusters = len(targets)
+    current_counts = np.bincount(assignments, minlength=n_clusters)
+    
+    # Создаем копию для модификации
+    balanced = assignments.copy()
+    
+    # Для каждого кластера проверяем баланс
+    for cluster in range(n_clusters):
+        current = current_counts[cluster]
+        target = targets[cluster]
+        
+        if current > target + 3:  # Слишком много точек
+            excess = current - (target + 3)
+            cluster_indices = np.where(balanced == cluster)[0]
+            
+            # Находим самые дальние точки от центра
+            if len(cluster_indices) > 0:
+                distances = np.sqrt(np.sum((points[cluster_indices] - centers[cluster]) ** 2, axis=1))
+                # Сортируем по убыванию расстояния
+                far_indices = cluster_indices[np.argsort(distances)[::-1]]
+                
+                # Перемещаем excess самых дальних точек
+                moved = 0
+                for idx in far_indices:
+                    if moved >= excess:
+                        break
+                    
+                    # Находим ближайший другой кластер с дефицитом
+                    point = points[idx]
+                    best_new_cluster = -1
+                    best_dist = float('inf')
+                    
+                    for other_cluster in range(n_clusters):
+                        if other_cluster == cluster:
+                            continue
+                        if current_counts[other_cluster] < targets[other_cluster]:
+                            dist = np.sqrt(np.sum((point - centers[other_cluster]) ** 2))
+                            if dist < best_dist:
+                                best_dist = dist
+                                best_new_cluster = other_cluster
+                    
+                    if best_new_cluster != -1:
+                        balanced[idx] = best_new_cluster
+                        current_counts[cluster] -= 1
+                        current_counts[best_new_cluster] += 1
+                        moved += 1
+    
+    return balanced
+
+
+def attach_outliers_simple(outlier_points: np.ndarray, outlier_ids: List[str],
+                          week_clusters: Dict, week_assignments: Dict) -> Dict:
+    """Прикрепление выбросов к ближайшим кластерам"""
+    if len(outlier_points) == 0:
+        return week_assignments
+    
+    for i, point in enumerate(outlier_points):
+        point_id = outlier_ids[i]
+        min_dist = float('inf')
+        best_week = -1
+        
+        # Находим ближайший кластер
+        for week, cluster_info in week_clusters.items():
+            centroid = np.array(cluster_info['centroid'])
+            dist = np.sqrt(np.sum((point - centroid) ** 2))
+            if dist < min_dist:
+                min_dist = dist
+                best_week = week
+        
+        # Добавляем точку к ближайшему кластеру
+        if best_week != -1:
+            if best_week not in week_assignments:
+                week_assignments[best_week] = []
+            week_assignments[best_week].append(point_id)
+    
+    return week_assignments
+
+
+def fallback_geographic_split(points_coords: List[List[float]], 
+                             point_ids: List[str], 
+                             num_weeks: int, 
+                             coefficients: List[float]) -> Tuple[Dict, Dict]:
+    """Фолбэк: простое географическое разбиение"""
+    if not points_coords or not point_ids or num_weeks <= 0:
+        return {}, {}
+    
+    try:
+        points_np = np.array(points_coords, dtype=float)
+    except:
+        return {}, {}
+    
+    # Сортируем по широте (север-юг), затем по долготе (запад-восток)
+    if len(points_np) > 0:
+        # Используем устойчивую сортировку
+        sorted_indices = np.lexsort((points_np[:, 1], points_np[:, 0]))  # lat, lon
+    else:
+        return {}, {}
+    
+    week_assignments = {}
+    week_clusters = {}
+    
+    points_per_week = len(points_coords) // num_weeks
+    remainder = len(points_coords) % num_weeks
+    
+    start_idx = 0
+    for week in range(num_weeks):
+        week_size = points_per_week + (1 if week < remainder else 0)
+        end_idx = min(start_idx + week_size, len(points_coords))
+        
+        if start_idx < len(points_coords):
+            week_indices = sorted_indices[start_idx:end_idx]
+            week_point_ids = [point_ids[idx] for idx in week_indices]
+            
+            week_assignments[week] = week_point_ids
+            
+            # Вычисляем центроид
+            if len(week_indices) > 0:
+                week_points = points_np[week_indices]
+                centroid = np.mean(week_points, axis=0)
+                week_clusters[week] = {
+                    'centroid': centroid.tolist(),
+                    'size': len(week_points),
+                    'compactness': 0.0
+                }
+            
+            start_idx = end_idx
+    
+    return week_assignments, week_clusters
+                                 
+# ==============================================
+# ФУНКЦИЯ ДЛЯ РАЗБИЕНИЯ ПОЛИГОНА ПО НЕДЕЛЯМ
+# ==============================================
+
+def split_polygon_by_weeks(polygon_coords, points_coords, point_ids, num_weeks, 
+                          coefficients, polygon_name="", auditor_id="", logger=None):
+    """
+    Разбивает полигон аудитора на N компактных областей по неделям
+    Возвращает: (week_assignment, week_clusters)
+    """
+    
+    import numpy as np
+    
+    # Проверка входных данных
+    if not points_coords or not point_ids or num_weeks <= 0:
+        if logger:
+            logger("❌ Недостаточно данных для разбиения")
+        return {}, {}
+    
+    if len(points_coords) != len(point_ids):
+        if logger:
+            logger(f"❌ Несоответствие координат ({len(points_coords)}) и ID ({len(point_ids)})")
+        return {}, {}
+    
+    # Создаем logger если не предоставлен
+    if logger is None:
+        def default_logger(msg):
+            print(f"[{auditor_id or 'UNKNOWN'}] {msg}")
+        logger = default_logger
+    
+    try:
+        logger(f"Начинаю разбиение: {len(point_ids)} точек на {num_weeks} недель")
+        
+        week_assignment = {}
+        week_clusters = {}
+        
+        # 1. Если точек меньше чем недель
+        if len(point_ids) < num_weeks:
+            logger(f"⚠️ Точек ({len(point_ids)}) меньше чем недель ({num_weeks})")
+            # Каждой точке своя неделя
+            for i, point_id in enumerate(point_ids):
+                if i < num_weeks:
+                    week_assignment[i] = [point_id]
+                    if i < len(points_coords):
+                        week_clusters[i] = {
+                            'centroid': points_coords[i],
+                            'size': 1
+                        }
+            return week_assignment, week_clusters
+        
+        # 2. Распределяем точки по неделям
+        total_points = len(point_ids)
+        points_per_week = total_points // num_weeks
+        remainder = total_points % num_weeks
+        
+        logger(f"Точек в неделю: {points_per_week}, остаток: {remainder}")
+        
+        start_idx = 0
+        for week in range(num_weeks):
+            # Определяем размер недели
+            week_size = points_per_week + (1 if week < remainder else 0)
+            end_idx = start_idx + week_size
+            
+            if start_idx >= total_points:
+                break
+                
+            # Берем точки для этой недели
+            week_point_ids = point_ids[start_idx:end_idx]
+            week_assignment[week] = week_point_ids
+            
+            # Вычисляем центроид
+            week_points_coords = []
+            for i in range(start_idx, min(end_idx, len(points_coords))):
+                week_points_coords.append(points_coords[i])
+            
+            if week_points_coords:
+                try:
+                    points_array = np.array(week_points_coords, dtype=float)
+                    centroid = points_array.mean(axis=0).tolist()
+                    week_clusters[week] = {
+                        'centroid': centroid,
+                        'size': len(week_points_coords),
+                        'points_count': len(week_point_ids)
+                    }
+                except Exception as e:
+                    logger(f"⚠️ Ошибка вычисления центроида недели {week}: {str(e)}")
+                    # Используем первую точку как центроид
+                    week_clusters[week] = {
+                        'centroid': week_points_coords[0] if week_points_coords else [0, 0],
+                        'size': len(week_points_coords),
+                        'points_count': len(week_point_ids)
+                    }
+            
+            start_idx = end_idx
+        
+        # 3. Проверяем результат
+        total_assigned = sum(len(ids) for ids in week_assignment.values())
+        logger(f"✅ Разбиение завершено: {total_assigned} точек распределено по {len(week_assignment)} неделям")
+        
+        # Логи по неделям
+        for week in sorted(week_assignment.keys()):
+            week_size = len(week_assignment[week])
+            logger(f"  Неделя {week}: {week_size} точек")
+        
+        return week_assignment, week_clusters
+        
+    except Exception as e:
+        logger(f"🔥 КРИТИЧЕСКАЯ ОШИБКА в split_polygon_by_weeks: {str(e)}")
+        import traceback
+        logger(f"Детали: {traceback.format_exc()[:200]}")
+        return {}, {}
+
 # ==============================================
 # ОБНОВЛЕННАЯ ФУНКЦИЯ create_weekly_route_schedule
 # ==============================================
@@ -3434,443 +3864,9 @@ if st.session_state.plan_calculated:
         st.caption(f"📊 Данные: {len(st.session_state.points_df) if st.session_state.points_df is not None else 0} точек, "
                   f"{len(st.session_state.polygons) if st.session_state.polygons else 0} полигонов, "
                   f"{len(st.session_state.auditors_df) if st.session_state.auditors_df is not None else 0} аудиторов")
-    # ==============================================
-# ИСПРАВЛЕННЫЙ МОДУЛЬ: РАЗБИЕНИЕ ПОЛИГОНА ПО НЕДЕЛЯМ (БЕЗ STREAMLIT)
-# ==============================================
-
-import numpy as np
-import math
-from typing import Dict, List, Tuple, Optional, Callable
-import warnings
-
-# Глобальная переменная как в основном коде
-SCIPY_AVAILABLE = False
-try:
-    from scipy.spatial import ConvexHull
-    SCIPY_AVAILABLE = True
-except ImportError:
-    SCIPY_AVAILABLE = False
-
-def split_polygon_by_weeks(polygon_coords: List[List[float]], 
-                          points_coords: List[List[float]], 
-                          point_ids: List[str], 
-                          num_weeks: int, 
-                          coefficients: List[float],
-                          polygon_name: str = "", 
-                          auditor_id: str = "", 
-                          logger: Optional[Callable] = None) -> Tuple[Dict, Dict]:
-    """
-    Разбивает полигон аудитора на N компактных областей по неделям
-    БЕЗ ИСПОЛЬЗОВАНИЯ Streamlit (logger для сообщений)
-    """
-    if logger is None:
-        # Простая функция логирования по умолчанию
-        def default_logger(msg):
-            print(f"[{auditor_id or 'UNKNOWN'}] {msg}")
-        logger = default_logger
-    
-    try:
-        # 1. ВАЛИДАЦИЯ ВХОДНЫХ ДАННЫХ
-        if not polygon_coords or not points_coords or not point_ids or num_weeks <= 0:
-            logger("Недостаточно данных для разбиения")
-            return fallback_geographic_split(points_coords, point_ids, num_weeks, coefficients)
-        
-        if len(points_coords) != len(point_ids):
-            logger(f"Несоответствие количества координат ({len(points_coords)}) и ID ({len(point_ids)})")
-            return fallback_geographic_split(points_coords, point_ids, num_weeks, coefficients)
-        
-        if len(polygon_coords) < 3:
-            logger(f"Полигон {polygon_name} имеет менее 3 вершин")
-            return fallback_geographic_split(points_coords, point_ids, num_weeks, coefficients)
-        
-        # Конвертируем в numpy (только координаты)
-        try:
-            poly_coords_np = np.array(polygon_coords, dtype=float)
-            points_np = np.array(points_coords, dtype=float)  # Только координаты
-        except ValueError as e:
-            logger(f"Ошибка конвертации координат: {str(e)}")
-            return fallback_geographic_split(points_coords, point_ids, num_weeks, coefficients)
-        
-        if len(points_np) == 0:
-            logger("Нет точек для разбиения")
-            return {}, {}
-        
-        # 2. ВЫЧИСЛЕНИЕ ЦЕНТРОИДА
-        poly_centroid = np.mean(poly_coords_np, axis=0)
-        
-        # 3. ОПРЕДЕЛЕНИЕ ВЫБРОСОВ (упрощенный метод)
-        normal_indices, outlier_indices = detect_outliers_simple(points_np, poly_centroid)
-        
-        normal_points = points_np[normal_indices]
-        normal_ids = [point_ids[i] for i in normal_indices]
-        
-        outlier_points = points_np[outlier_indices]
-        outlier_ids = [point_ids[i] for i in outlier_indices]
-        
-        logger(f"Нормальные точки: {len(normal_points)}, выбросы: {len(outlier_points)}")
-        
-        if len(normal_points) < num_weeks:
-            logger(f"Слишком мало точек ({len(normal_points)}) для разбиения на {num_weeks} недель")
-            return fallback_geographic_split(points_coords, point_ids, num_weeks, coefficients)
-        
-        # 4. РАСЧЕТ КОЛИЧЕСТВА ТОЧЕК ПО НЕДЕЛЯМ
-        weekly_targets = calculate_weekly_targets_simple(len(normal_points), num_weeks, coefficients)
-        
-        # 5. ИНИЦИАЛИЗАЦИЯ КЛАСТЕРОВ
-        initial_centers = initialize_clusters_simple(poly_coords_np, num_weeks, points_np)
-        
-        # 6. БАЛАНСИРОВАННЫЙ K-MEANS
-        week_assignments, week_clusters = simple_balanced_kmeans(
-            normal_points, normal_ids, num_weeks, initial_centers, weekly_targets, logger
-        )
-        
-        # 7. ПРИКЛЕИВАНИЕ ВЫБРОСОВ
-        if len(outlier_points) > 0:
-            week_assignments = attach_outliers_simple(
-                outlier_points, outlier_ids, week_clusters, week_assignments
-            )
-            logger(f"Добавлено {len(outlier_points)} выбросов к кластерам")
-        
-        # 8. ПРОВЕРКА РЕЗУЛЬТАТОВ
-        if not week_assignments:
-            logger("Не удалось разбить точки по неделям")
-            return fallback_geographic_split(points_coords, point_ids, num_weeks, coefficients)
-        
-        # 9. ФОРМИРОВАНИЕ ФИНАЛЬНОГО РЕЗУЛЬТАТА
-        final_assignment = {}
-        total_points_assigned = 0
-        for week in sorted(week_assignments.keys()):
-            point_ids_list = week_assignments[week]
-            final_assignment[week] = point_ids_list
-            total_points_assigned += len(point_ids_list)
-            logger(f"Неделя {week}: {len(point_ids_list)} точек")
-        
-        logger(f"Всего распределено точек: {total_points_assigned} из {len(points_coords)}")
-        
-        if total_points_assigned != len(points_coords):
-            logger(f"⚠️ Не все точки распределены: {len(points_coords) - total_points_assigned} потеряно")
-        
-        return final_assignment, week_clusters
-        
-    except Exception as e:
-        logger(f"❌ Критическая ошибка в split_polygon_by_weeks: {str(e)}")
-        import traceback
-        logger(f"Детали: {traceback.format_exc()[:200]}")
-        # Фолбэк на простое географическое разбиение
-        return fallback_geographic_split(points_coords, point_ids, num_weeks, coefficients)
-
-
-def detect_outliers_simple(points: np.ndarray, centroid: np.ndarray, 
-                          threshold_multiplier: float = 2.0) -> Tuple[List[int], List[int]]:
-    """Простой метод определения выбросов по расстоянию до центроида"""
-    if len(points) == 0:
-        return [], []
-    
-    try:
-        # Вычисляем расстояния до центроида
-        distances = np.sqrt(np.sum((points - centroid) ** 2, axis=1))
-        
-        # Среднее расстояние + порог
-        mean_dist = np.mean(distances)
-        std_dist = np.std(distances) if len(distances) > 1 else 0
-        
-        if std_dist == 0:
-            # Все точки на одинаковом расстоянии
-            return list(range(len(points))), []
-        
-        threshold = mean_dist + threshold_multiplier * std_dist
-        
-        normal_indices = np.where(distances <= threshold)[0].tolist()
-        outlier_indices = np.where(distances > threshold)[0].tolist()
-        
-        return normal_indices, outlier_indices
-    except:
-        # Если что-то пошло не так, считаем все точки нормальными
-        return list(range(len(points))), []
-
-
-def calculate_weekly_targets_simple(total_points: int, num_weeks: int, 
-                                   coefficients: List[float]) -> List[int]:
-    """Упрощенный расчет целевого количества точек"""
-    if total_points <= 0 or num_weeks <= 0:
-        return []
-    
-    if len(coefficients) < 4:
-        coefficients = [1.0] * 4
-    
-    # Простая логика распределения
-    if num_weeks <= 4:
-        # Используем коэффициенты напрямую
-        normalized = [c / sum(coefficients[:num_weeks]) for c in coefficients[:num_weeks]]
-    else:
-        # Распределяем коэффициенты циклически
-        weekly_coeffs = []
-        for i in range(num_weeks):
-            weekly_coeffs.append(coefficients[i % 4])
-        total_coeff = sum(weekly_coeffs)
-        normalized = [c / total_coeff for c in weekly_coeffs]
-    
-    # Рассчитываем цели
-    targets = []
-    remaining = total_points
-    
-    for i in range(num_weeks):
-        if i == num_weeks - 1:
-            target = remaining  # Последняя неделя получает остаток
-        else:
-            target = max(1, int(round(total_points * normalized[i])))
-            remaining -= target
-        
-        targets.append(target)
-    
-    # Корректируем если нужно
-    total_assigned = sum(targets)
-    if total_assigned != total_points:
-        diff = total_points - total_assigned
-        if diff != 0 and targets:
-            targets[-1] += diff
-    
-    return targets
-
-
-def initialize_clusters_simple(polygon: np.ndarray, num_clusters: int, 
-                              points: np.ndarray) -> np.ndarray:
-    """Простая инициализация центров кластеров"""
-    if len(points) == 0:
-        return np.array([])
-    
-    if len(points) <= num_clusters:
-        return points.copy()
-    
-    try:
-        # Пробуем использовать вершины полигона если возможно
-        if len(polygon) >= num_clusters:
-            # Выбираем равномерно распределенные точки полигона
-            indices = np.linspace(0, len(polygon) - 1, num_clusters, dtype=int)
-            return polygon[indices]
-        else:
-            # Случайные точки из данных
-            np.random.seed(42)  # Для воспроизводимости
-            indices = np.random.choice(len(points), num_clusters, replace=False)
-            return points[indices]
-    except:
-        # Fallback: первые num_clusters точек
-        return points[:num_clusters]
-
-
-def simple_balanced_kmeans(points: np.ndarray, point_ids: List[str], 
-                          num_clusters: int, initial_centers: np.ndarray,
-                          weekly_targets: List[int], logger: Callable) -> Tuple[Dict, Dict]:
-    """Упрощенный балансированный k-means"""
-    n_points = len(points)
-    
-    if n_points == 0 or num_clusters <= 0:
-        return {}, {}
-    
-    # Инициализация центров
-    centers = initial_centers.copy()
-    if len(centers) < num_clusters:
-        # Дополняем если нужно
-        needed = num_clusters - len(centers)
-        if n_points >= needed:
-            indices = np.random.choice(n_points, needed, replace=False)
-            centers = np.vstack([centers, points[indices]])
-    
-    # Простой k-means
-    for iteration in range(30):  # Максимум 30 итераций
-        # Шаг 1: Назначение точек по ближайшему центру
-        assignments = np.zeros(n_points, dtype=int)
-        for i, point in enumerate(points):
-            distances = np.sqrt(np.sum((centers - point) ** 2, axis=1))
-            assignments[i] = np.argmin(distances)
-        
-        # Шаг 2: Балансировка
-        assignments = simple_balance_assignments(assignments, weekly_targets, points, centers)
-        
-        # Шаг 3: Обновление центров
-        new_centers = centers.copy()
-        for i in range(num_clusters):
-            cluster_points = points[assignments == i]
-            if len(cluster_points) > 0:
-                new_centers[i] = np.mean(cluster_points, axis=0)
-            else:
-                # Если кластер пуст, перемещаем центр к случайной точке
-                idx = np.random.randint(0, n_points)
-                new_centers[i] = points[idx]
-        
-        # Шаг 4: Проверка сходимости
-        if np.max(np.sqrt(np.sum((centers - new_centers) ** 2, axis=1))) < 0.001:
-            break
-        
-        centers = new_centers
-    
-    # Формируем результат
-    week_assignments = {}
-    week_clusters = {}
-    
-    for week in range(num_clusters):
-        week_mask = assignments == week
-        week_point_ids = [point_ids[i] for i in range(n_points) if week_mask[i]]
-        
-        if week_point_ids:
-            week_points = points[week_mask]
-            week_assignments[week] = week_point_ids
-            
-            # Вычисляем центроид
-            centroid = np.mean(week_points, axis=0) if len(week_points) > 0 else centers[week]
-            
-            # Вычисляем компактность (среднее расстояние до центроида)
-            if len(week_points) > 0:
-                distances = np.sqrt(np.sum((week_points - centroid) ** 2, axis=1))
-                compactness = np.mean(distances)
-            else:
-                compactness = 0
-            
-            week_clusters[week] = {
-                'centroid': centroid.tolist(),
-                'size': len(week_points),
-                'compactness': float(compactness)
-            }
-    
-    return week_assignments, week_clusters
-
-
-def simple_balance_assignments(assignments: np.ndarray, targets: List[int],
-                              points: np.ndarray, centers: np.ndarray) -> np.ndarray:
-    """Простая балансировка назначений"""
-    n_clusters = len(targets)
-    current_counts = np.bincount(assignments, minlength=n_clusters)
-    
-    # Создаем копию для модификации
-    balanced = assignments.copy()
-    
-    # Для каждого кластера проверяем баланс
-    for cluster in range(n_clusters):
-        current = current_counts[cluster]
-        target = targets[cluster]
-        
-        if current > target + 3:  # Слишком много точек
-            excess = current - (target + 3)
-            cluster_indices = np.where(balanced == cluster)[0]
-            
-            # Находим самые дальние точки от центра
-            if len(cluster_indices) > 0:
-                distances = np.sqrt(np.sum((points[cluster_indices] - centers[cluster]) ** 2, axis=1))
-                # Сортируем по убыванию расстояния
-                far_indices = cluster_indices[np.argsort(distances)[::-1]]
-                
-                # Перемещаем excess самых дальних точек
-                moved = 0
-                for idx in far_indices:
-                    if moved >= excess:
-                        break
-                    
-                    # Находим ближайший другой кластер с дефицитом
-                    point = points[idx]
-                    best_new_cluster = -1
-                    best_dist = float('inf')
-                    
-                    for other_cluster in range(n_clusters):
-                        if other_cluster == cluster:
-                            continue
-                        if current_counts[other_cluster] < targets[other_cluster]:
-                            dist = np.sqrt(np.sum((point - centers[other_cluster]) ** 2))
-                            if dist < best_dist:
-                                best_dist = dist
-                                best_new_cluster = other_cluster
-                    
-                    if best_new_cluster != -1:
-                        balanced[idx] = best_new_cluster
-                        current_counts[cluster] -= 1
-                        current_counts[best_new_cluster] += 1
-                        moved += 1
-    
-    return balanced
-
-
-def attach_outliers_simple(outlier_points: np.ndarray, outlier_ids: List[str],
-                          week_clusters: Dict, week_assignments: Dict) -> Dict:
-    """Прикрепление выбросов к ближайшим кластерам"""
-    if len(outlier_points) == 0:
-        return week_assignments
-    
-    for i, point in enumerate(outlier_points):
-        point_id = outlier_ids[i]
-        min_dist = float('inf')
-        best_week = -1
-        
-        # Находим ближайший кластер
-        for week, cluster_info in week_clusters.items():
-            centroid = np.array(cluster_info['centroid'])
-            dist = np.sqrt(np.sum((point - centroid) ** 2))
-            if dist < min_dist:
-                min_dist = dist
-                best_week = week
-        
-        # Добавляем точку к ближайшему кластеру
-        if best_week != -1:
-            if best_week not in week_assignments:
-                week_assignments[best_week] = []
-            week_assignments[best_week].append(point_id)
-    
-    return week_assignments
-
-
-def fallback_geographic_split(points_coords: List[List[float]], 
-                             point_ids: List[str], 
-                             num_weeks: int, 
-                             coefficients: List[float]) -> Tuple[Dict, Dict]:
-    """Фолбэк: простое географическое разбиение"""
-    if not points_coords or not point_ids or num_weeks <= 0:
-        return {}, {}
-    
-    try:
-        points_np = np.array(points_coords, dtype=float)
-    except:
-        return {}, {}
-    
-    # Сортируем по широте (север-юг), затем по долготе (запад-восток)
-    if len(points_np) > 0:
-        # Используем устойчивую сортировку
-        sorted_indices = np.lexsort((points_np[:, 1], points_np[:, 0]))  # lat, lon
-    else:
-        return {}, {}
-    
-    week_assignments = {}
-    week_clusters = {}
-    
-    points_per_week = len(points_coords) // num_weeks
-    remainder = len(points_coords) % num_weeks
-    
-    start_idx = 0
-    for week in range(num_weeks):
-        week_size = points_per_week + (1 if week < remainder else 0)
-        end_idx = min(start_idx + week_size, len(points_coords))
-        
-        if start_idx < len(points_coords):
-            week_indices = sorted_indices[start_idx:end_idx]
-            week_point_ids = [point_ids[idx] for idx in week_indices]
-            
-            week_assignments[week] = week_point_ids
-            
-            # Вычисляем центроид
-            if len(week_indices) > 0:
-                week_points = points_np[week_indices]
-                centroid = np.mean(week_points, axis=0)
-                week_clusters[week] = {
-                    'centroid': centroid.tolist(),
-                    'size': len(week_points),
-                    'compactness': 0.0
-                }
-            
-            start_idx = end_idx
-    
-    return week_assignments, week_clusters
-
-
-
     
     current_tab += 1
+
 
 
 
