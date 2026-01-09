@@ -1340,6 +1340,21 @@ def split_polygon_by_weeks(polygon_coords, points_coords, point_ids, num_weeks,
 
 def create_weekly_route_schedule(points_df, points_assignment_df, auditors_df, 
                                  year, quarter, use_enhanced_split=False):
+
+    # ========== ДИАГНОСТИКА ==========
+    st.info("=== ДИАГНОСТИКА НАЧАТА ===")
+    st.info(f"use_enhanced_split = {use_enhanced_split}")
+    st.info(f"points_df: {'НЕТ' if points_df is None else f'{len(points_df)} строк'}")
+    st.info(f"auditors_df: {'НЕТ' if auditors_df is None else f'{len(auditors_df)} строк'}")
+    st.info(f"Есть ли polygons в session_state: {'polygons' in st.session_state}")
+    
+    if 'polygons' in st.session_state:
+        polygons = st.session_state.polygons
+        st.info(f"Количество полигонов: {len(polygons)}")
+        for i, (name, poly) in enumerate(list(polygons.items())[:3]):
+            st.info(f"  Полигон {i+1}: {name}, аудитор: {poly.get('auditor', '?')}")
+
+                                     
     """
     Создает ежедневные маршруты для аудиторов в формате EasyMerch
     """
@@ -3866,6 +3881,7 @@ if st.session_state.plan_calculated:
                   f"{len(st.session_state.auditors_df) if st.session_state.auditors_df is not None else 0} аудиторов")
     
     current_tab += 1
+
 
 
 
