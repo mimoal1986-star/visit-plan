@@ -1641,6 +1641,7 @@ def create_weekly_route_schedule(points_df, points_assignment_df, auditors_df,
         
         # Создаем строку
         row = {
+            'ID_Точки': point_id,
             'Address': point_info.get('Адрес', ''),
             'L1 Name': point_info.get('Название_Точки', str(point_id)),
             'ЧИСЛО визитов в НЕДЕЛЮ': visits_this_week,
@@ -1668,7 +1669,7 @@ def create_weekly_route_schedule(points_df, points_assignment_df, auditors_df,
     
     return final_df
 
-def create_easymerch_excel(routes_df):
+def create_easymerch_excel(routes_df, points_df):
     """Создает Excel файл в формате EasyMerch с несколькими листами"""
     import io
     
@@ -1679,7 +1680,61 @@ def create_easymerch_excel(routes_df):
     
     with pd.ExcelWriter(excel_buffer, engine='openpyxl') as writer:
         # Лист 1: Основные данные в формате EasyMerch
-        routes_df.to_excel(writer, sheet_name='Маршруты', index=False)
+        # Создаем копию для модификации
+        easymerch_df = routes_df.copy()
+        
+        # 1. Добавляем Customer number как первый столбец
+        # Используем ID_Точки если есть, иначе L1 Name
+        customer_number_col = None
+        if 'ID_Точки' in easymerch_df.columns:
+            customer_number_col = 'ID_Точки'
+        elif 'L1 Name' in easymerch_df.columns:
+            customer_number_col = 'L1 Name'
+        
+        if customer_number_col:
+            easymerch_df.insert(0, 'Customer number', easymerch_df[customer_number_col])
+        else:
+            easymerch_df.insert(0, 'Customer number', '')
+        
+        # 2. Заполняем столбец Город
+        easymerch_df['Город'] = ''
+        
+        if points_df is not None and not points_df.empty:
+            # Создаем словарь для сопоставления Customer number -> Город
+            city_mapping = {}
+            
+            # Вариант 1: по ID_Точки
+            if 'ID_Точки' in points_df.columns and 'Город' in points_df.columns:
+                for idx, row in points_df.iterrows():
+                    point_id = str(row['ID_Точки']).strip()
+                    city = str(row['Город']).strip()
+                    if point_id and city:
+                        city_mapping[point_id] = city
+            
+            # Вариант 2: по названию точки (если нет ID_Точки в routes_df)
+            if 'Название_Точки' in points_df.columns and 'Город' in points_df.columns:
+                for idx, row in points_df.iterrows():
+                    point_name = str(row['Название_Точки']).strip()
+                    city = str(row['Город']).strip()
+                    if point_name and city:
+                        city_mapping[point_name] = city
+            
+            # Заполняем города
+            if city_mapping:
+                # Пробуем сопоставить по Customer number
+                easymerch_df['Город'] = easymerch_df['Customer number'].map(city_mapping).fillna('')
+        
+        # 3. Добавляем столбец Вне графика после Воскресенье
+        if 'Воскресенье' in easymerch_df.columns:
+            # Находим индекс столбца Воскресенье
+            col_list = list(easymerch_df.columns)
+            if 'Воскресенье' in col_list:
+                sunday_idx = col_list.index('Воскресенье')
+                # Вставляем новый столбец после Воскресенье
+                easymerch_df.insert(sunday_idx + 1, 'Вне графика', '')
+        
+        # Сохраняем в Excel
+        easymerch_df.to_excel(writer, sheet_name='Маршруты', index=False)
         
         # Автонастройка ширины колонок для основного листа
         worksheet = writer.sheets['Маршруты']
@@ -1698,6 +1753,7 @@ def create_easymerch_excel(routes_df):
         # Лист 2: Инструкция по использованию
         instructions_data = [
             ["ПОЛЕ", "ОПИСАНИЕ", "ПРИМЕР", "ОБЯЗАТЕЛЬНОСТЬ"],
+            ["Customer number", "ID торговой точки", "P001", "Да"],
             ["Address", "Полный адрес точки", "ул. Ленина, д. 1, Москва", "Да"],
             ["L1 Name", "Название торговой точки", 'Магазин "Продукты"', "Да"],
             ["ЧИСЛО визитов в НЕДЕЛЮ", "Количество визитов в неделю (цифра)", "1, 2, 3", "Да"],
@@ -1709,8 +1765,12 @@ def create_easymerch_excel(routes_df):
             ["Пятница", "Визит в пятницу (1-да, пусто-нет)", "1", "Нет"],
             ["Суббота", "Визит в субботу (1-да, пусто-нет)", "", "Нет"],
             ["Воскресенье", "Визит в воскресенье (1-да, пусто-нет)", "", "Нет"],
+            ["Вне графика", "Визиты вне регулярного графика", "", "Нет"],
             ["Цикл посещения", "Номер недели (ISO стандарт)", "15", "Да"],
             ["Дата начала цикла посещения", "Дата понедельника в формате ГГГГММДД", "20250407", "Да"],
+            ["Широта", "Координата широты", "55.755831", "Нет"],
+            ["Долгота", "Координата долготы", "37.617673", "Нет"],
+            ["Город", "Город расположения точки", "Москва", "Да"],
             ["", "", "", ""],
             ["ИНСТРУКЦИЯ ПО ИСПОЛЬЗОВАНИЮ:", "", "", ""],
             ["1. Файл готов для загрузки в EasyMerch", "", "", ""],
@@ -1741,6 +1801,7 @@ def create_easymerch_excel(routes_df):
                 'Первая неделя',
                 'Последняя неделя',
                 'Среднее визитов на аудитора',
+                'Количество городов',
                 'Дата создания отчета'
             ],
             'Значение': [
@@ -1753,6 +1814,7 @@ def create_easymerch_excel(routes_df):
                 routes_df['Цикл посещения'].max() if not routes_df.empty else '-',
                 round(routes_df['ЧИСЛО визитов в НЕДЕЛЮ'].sum() / routes_df['Login пользователя'].nunique(), 1) 
                 if routes_df['Login пользователя'].nunique() > 0 else 0,
+                easymerch_df['Город'].nunique() if 'Город' in easymerch_df.columns else 0,
                 datetime.now().strftime('%d.%m.%Y %H:%M')
             ]
         }
@@ -3484,7 +3546,7 @@ if st.session_state.plan_calculated:
                                         with st.spinner("🔄 Подготовка Excel файла..."):
                                             try:
                                                 # Создаем Excel файл
-                                                excel_data = create_easymerch_excel(routes_df)
+                                                excel_data = create_easymerch_excel(routes_df, st.session_state.points_df)
                                                 
                                                 if excel_data:
                                                     st.download_button(
@@ -3862,6 +3924,7 @@ if st.session_state.plan_calculated:
                   f"{len(st.session_state.auditors_df) if st.session_state.auditors_df is not None else 0} аудиторов")
     
     current_tab += 1
+
 
 
 
