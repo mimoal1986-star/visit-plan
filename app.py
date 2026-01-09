@@ -681,21 +681,28 @@ def simple_cluster_points(points, n_clusters):
             clusters[nearest_idx].append(point)
     
     return clusters
-
 def create_daily_routes_for_auditor(auditor_points, working_days, auditor_id):
-
-# ДИАГНОСТИКА
-    print(f"Создано маршрутов: {len(routes)}")
-if routes:
-    print(f"Пример маршрута: {routes[0]}")
-    
     """Создает ежедневные маршруты для аудитора"""
     try:
+        # ДИАГНОСТИКА в НАЧАЛЕ функции
+        print(f"\n=== create_daily_routes_for_auditor ===")
+        print(f"Аудитор: {auditor_id}")
+        print(f"Получено точек: {len(auditor_points) if auditor_points else 0}")
+        print(f"Получено рабочих дней: {len(working_days) if working_days else 0}")
+        
+        if auditor_points and len(auditor_points) > 0:
+            print(f"Пример точки: {auditor_points[0].get('ID_Точки', 'NO_ID')}")
+        
+        if working_days and len(working_days) > 0:
+            print(f"Пример дня: {working_days[0]}")
+        
         if not auditor_points or not working_days:
+            print("❌ Пустые входные данные!")
             return []
         
         K = len(working_days)
         if K == 0:
+            print("❌ Нет рабочих дней!")
             return []
         
         # 1. Валидация точек
@@ -719,11 +726,15 @@ if routes:
             except (ValueError, TypeError):
                 continue
         
+        print(f"✅ Валидных точек: {len(valid_points)}")
+        
         if not valid_points:
+            print("❌ Нет валидных точек!")
             return []
         
         # 2. Если точек меньше чем дней
         if len(valid_points) <= K:
+            print(f"✅ Точек ({len(valid_points)}) меньше или равно дням ({K}), используем простое распределение")
             return simple_distribute_points(valid_points, working_days, auditor_id)
         
         # 3. Улучшенная географическая сортировка
@@ -743,6 +754,8 @@ if routes:
         base_size = total_points // K
         remainder = total_points % K
         
+        print(f"✅ Распределение: {K} дней, по {base_size} точек + {remainder} остаток")
+        
         start_idx = 0
         for day_idx in range(K):
             size = base_size + (1 if day_idx < remainder else 0)
@@ -751,22 +764,26 @@ if routes:
             if start_idx < total_points:
                 day_points = sorted_points[start_idx:end_idx]
                 daily_groups.append(day_points)
+                print(f"  День {day_idx}: {len(day_points)} точек")
                 start_idx = end_idx
             else:
                 daily_groups.append([])
+                print(f"  День {day_idx}: 0 точек")
         
         # 5. Создаем маршруты
         routes = []
         
         for day_idx, (day_date, day_points) in enumerate(zip(working_days, daily_groups)):
             if not day_points:
+                print(f"  День {day_idx}: нет точек, пропускаем")
                 continue
             
+            print(f"  День {day_idx}: {len(day_points)} точек для маршрутизации")
+            
             # Преобразуем дату
+            visit_datetime = day_date
             if isinstance(day_date, date) and not isinstance(day_date, datetime):
                 visit_datetime = datetime.combine(day_date, datetime.min.time())
-            else:
-                visit_datetime = day_date
             
             # Создаем маршруты для каждого дня
             for order, point in enumerate(day_points, 1):
@@ -784,16 +801,27 @@ if routes:
                 }
                 routes.append(route_entry)
         
+        # ДИАГНОСТИКА в КОНЦЕ
+        print(f"✅ Создано маршрутов: {len(routes)}")
+        if routes:
+            print(f"Пример маршрута: ID={routes[0]['ID_Точки']}, Дата={routes[0]['Дата']}, День={routes[0]['День_недели']}")
+        
         return routes
     
     except Exception as e:
-        st.error(f"❌ Ошибка в create_daily_routes_for_auditor: {str(e)}")
+        print(f"❌ Ошибка в create_daily_routes_for_auditor: {str(e)}")
+        import traceback
+        print(f"Детали: {traceback.format_exc()[:200]}")
         return []
         
 
 
 def simple_distribute_points(points, working_days, auditor_id):
-    """Простое распределение точек по дням (каждая точка в свой день)"""
+    """Простое распределение точек по дням"""
+    
+    print(f"\n=== simple_distribute_points ===")
+    print(f"Точек: {len(points)}, Дней: {len(working_days)}")
+    
     routes = []
     
     for i, point in enumerate(points):
@@ -821,6 +849,7 @@ def simple_distribute_points(points, working_days, auditor_id):
             'Порядок_в_дне': 1
         })
     
+    print(f"Создано маршрутов: {len(routes)}")
     return routes
 
 
@@ -3812,6 +3841,7 @@ if st.session_state.plan_calculated:
                   f"{len(st.session_state.auditors_df) if st.session_state.auditors_df is not None else 0} аудиторов")
     
     current_tab += 1
+
 
 
 
