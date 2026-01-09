@@ -15,9 +15,18 @@ from datetime import datetime, date, timedelta
 import calendar
 import json
 import base64
-from typing import Dict, List, Tuple, Optional, Any
+from typing import Dict, List, Tuple, Optional,Callable, Any
 import warnings
 warnings.filterwarnings('ignore')
+
+
+# Глобальная переменная как в основном коде
+SCIPY_AVAILABLE = False
+try:
+    from scipy.spatial import ConvexHull
+    SCIPY_AVAILABLE = True
+except ImportError:
+    SCIPY_AVAILABLE = False
 
 # ВИЗУАЛИЗАЦИЯ
 import plotly.express as px
@@ -117,6 +126,14 @@ with st.sidebar:
     
     *Настройки сохраняются автоматически*
     """)
+    st.markdown("---")
+
+    st.subheader("🎯 Алгоритм разбиения")
+    use_enhanced_split = st.checkbox(
+        "Использовать улучшенное разбиение по неделям", 
+        value=False,
+        help="Разбивает полигоны аудиторов на компактные недельные области с балансировкой ±3 точки"
+    )
 
 # ==============================================
 # ФУНКЦИИ ДЛЯ СОЗДАНИЯ ШАБЛОНОВ
@@ -2430,11 +2447,12 @@ if calculate_button:
             try:
                 # Создаем таблицу с маршрутами
                 routes_df = create_weekly_route_schedule(
-                    points_df,
-                    points_assignment_df,
-                    auditors_df,  # ← ТОЛЬКО 5 АРГУМЕНТОВ!
-                    year,
-                    quarter
+                    points_df, 
+                    points_assignment_df, 
+                    auditors_df, 
+                    year, 
+                    quarter, 
+                    use_enhanced_split=use_enhanced_split  # ← добавить этот параметр
                 )
                 
                 if not routes_df.empty:
@@ -3228,6 +3246,724 @@ if st.session_state.plan_calculated:
                   f"{len(st.session_state.polygons) if st.session_state.polygons else 0} полигонов, "
                   f"{len(st.session_state.auditors_df) if st.session_state.auditors_df is not None else 0} аудиторов")
     current_tab += 1
+
+# ==============================================
+# ИСПРАВЛЕННЫЙ МОДУЛЬ: РАЗБИЕНИЕ ПОЛИГОНА ПО НЕДЕЛЯМ (БЕЗ STREAMLIT)
+# ==============================================
+
+
+
+def split_polygon_by_weeks(polygon_coords: List[List[float]], 
+                          points_coords: List[List[float]], 
+                          point_ids: List[str], 
+                          num_weeks: int, 
+                          coefficients: List[float],
+                          polygon_name: str = "", 
+                          auditor_id: str = "", 
+                          logger: Optional[Callable] = None) -> Tuple[Dict, Dict]:
+    """
+    Разбивает полигон аудитора на N компактных областей по неделям
+    БЕЗ ИСПОЛЬЗОВАНИЯ Streamlit (logger для сообщений)
+    """
+    if logger is None:
+        # Простая функция логирования по умолчанию
+        def default_logger(msg):
+            print(f"[{auditor_id or 'UNKNOWN'}] {msg}")
+        logger = default_logger
+    
+    try:
+        # 1. ВАЛИДАЦИЯ ВХОДНЫХ ДАННЫХ
+        if not polygon_coords or not points_coords or not point_ids or num_weeks <= 0:
+            logger("Недостаточно данных для разбиения")
+            return fallback_geographic_split(points_coords, point_ids, num_weeks, coefficients)
+        
+        if len(points_coords) != len(point_ids):
+            logger(f"Несоответствие количества координат ({len(points_coords)}) и ID ({len(point_ids)})")
+            return fallback_geographic_split(points_coords, point_ids, num_weeks, coefficients)
+        
+        if len(polygon_coords) < 3:
+            logger(f"Полигон {polygon_name} имеет менее 3 вершин")
+            return fallback_geographic_split(points_coords, point_ids, num_weeks, coefficients)
+        
+        # Конвертируем в numpy (только координаты)
+        try:
+            poly_coords_np = np.array(polygon_coords, dtype=float)
+            points_np = np.array(points_coords, dtype=float)  # Только координаты
+        except ValueError as e:
+            logger(f"Ошибка конвертации координат: {str(e)}")
+            return fallback_geographic_split(points_coords, point_ids, num_weeks, coefficients)
+        
+        if len(points_np) == 0:
+            logger("Нет точек для разбиения")
+            return {}, {}
+        
+        # 2. ВЫЧИСЛЕНИЕ ЦЕНТРОИДА
+        poly_centroid = np.mean(poly_coords_np, axis=0)
+        
+        # 3. ОПРЕДЕЛЕНИЕ ВЫБРОСОВ (упрощенный метод)
+        normal_indices, outlier_indices = detect_outliers_simple(points_np, poly_centroid)
+        
+        normal_points = points_np[normal_indices]
+        normal_ids = [point_ids[i] for i in normal_indices]
+        
+        outlier_points = points_np[outlier_indices]
+        outlier_ids = [point_ids[i] for i in outlier_indices]
+        
+        logger(f"Нормальные точки: {len(normal_points)}, выбросы: {len(outlier_points)}")
+        
+        if len(normal_points) < num_weeks:
+            logger(f"Слишком мало точек ({len(normal_points)}) для разбиения на {num_weeks} недель")
+            return fallback_geographic_split(points_coords, point_ids, num_weeks, coefficients)
+        
+        # 4. РАСЧЕТ КОЛИЧЕСТВА ТОЧЕК ПО НЕДЕЛЯМ
+        weekly_targets = calculate_weekly_targets_simple(len(normal_points), num_weeks, coefficients)
+        
+        # 5. ИНИЦИАЛИЗАЦИЯ КЛАСТЕРОВ
+        initial_centers = initialize_clusters_simple(poly_coords_np, num_weeks, points_np)
+        
+        # 6. БАЛАНСИРОВАННЫЙ K-MEANS
+        week_assignments, week_clusters = simple_balanced_kmeans(
+            normal_points, normal_ids, num_weeks, initial_centers, weekly_targets, logger
+        )
+        
+        # 7. ПРИКЛЕИВАНИЕ ВЫБРОСОВ
+        if len(outlier_points) > 0:
+            week_assignments = attach_outliers_simple(
+                outlier_points, outlier_ids, week_clusters, week_assignments
+            )
+            logger(f"Добавлено {len(outlier_points)} выбросов к кластерам")
+        
+        # 8. ПРОВЕРКА РЕЗУЛЬТАТОВ
+        if not week_assignments:
+            logger("Не удалось разбить точки по неделям")
+            return fallback_geographic_split(points_coords, point_ids, num_weeks, coefficients)
+        
+        # 9. ФОРМИРОВАНИЕ ФИНАЛЬНОГО РЕЗУЛЬТАТА
+        final_assignment = {}
+        total_points_assigned = 0
+        for week in sorted(week_assignments.keys()):
+            point_ids_list = week_assignments[week]
+            final_assignment[week] = point_ids_list
+            total_points_assigned += len(point_ids_list)
+            logger(f"Неделя {week}: {len(point_ids_list)} точек")
+        
+        logger(f"Всего распределено точек: {total_points_assigned} из {len(points_coords)}")
+        
+        if total_points_assigned != len(points_coords):
+            logger(f"⚠️ Не все точки распределены: {len(points_coords) - total_points_assigned} потеряно")
+        
+        return final_assignment, week_clusters
+        
+    except Exception as e:
+        logger(f"❌ Критическая ошибка в split_polygon_by_weeks: {str(e)}")
+        import traceback
+        logger(f"Детали: {traceback.format_exc()[:200]}")
+        # Фолбэк на простое географическое разбиение
+        return fallback_geographic_split(points_coords, point_ids, num_weeks, coefficients)
+
+
+def detect_outliers_simple(points: np.ndarray, centroid: np.ndarray, 
+                          threshold_multiplier: float = 2.0) -> Tuple[List[int], List[int]]:
+    """Простой метод определения выбросов по расстоянию до центроида"""
+    if len(points) == 0:
+        return [], []
+    
+    try:
+        # Вычисляем расстояния до центроида
+        distances = np.sqrt(np.sum((points - centroid) ** 2, axis=1))
+        
+        # Среднее расстояние + порог
+        mean_dist = np.mean(distances)
+        std_dist = np.std(distances) if len(distances) > 1 else 0
+        
+        if std_dist == 0:
+            # Все точки на одинаковом расстоянии
+            return list(range(len(points))), []
+        
+        threshold = mean_dist + threshold_multiplier * std_dist
+        
+        normal_indices = np.where(distances <= threshold)[0].tolist()
+        outlier_indices = np.where(distances > threshold)[0].tolist()
+        
+        return normal_indices, outlier_indices
+    except:
+        # Если что-то пошло не так, считаем все точки нормальными
+        return list(range(len(points))), []
+
+
+def calculate_weekly_targets_simple(total_points: int, num_weeks: int, 
+                                   coefficients: List[float]) -> List[int]:
+    """Упрощенный расчет целевого количества точек"""
+    if total_points <= 0 or num_weeks <= 0:
+        return []
+    
+    if len(coefficients) < 4:
+        coefficients = [1.0] * 4
+    
+    # Простая логика распределения
+    if num_weeks <= 4:
+        # Используем коэффициенты напрямую
+        normalized = [c / sum(coefficients[:num_weeks]) for c in coefficients[:num_weeks]]
+    else:
+        # Распределяем коэффициенты циклически
+        weekly_coeffs = []
+        for i in range(num_weeks):
+            weekly_coeffs.append(coefficients[i % 4])
+        total_coeff = sum(weekly_coeffs)
+        normalized = [c / total_coeff for c in weekly_coeffs]
+    
+    # Рассчитываем цели
+    targets = []
+    remaining = total_points
+    
+    for i in range(num_weeks):
+        if i == num_weeks - 1:
+            target = remaining  # Последняя неделя получает остаток
+        else:
+            target = max(1, int(round(total_points * normalized[i])))
+            remaining -= target
+        
+        targets.append(target)
+    
+    # Корректируем если нужно
+    total_assigned = sum(targets)
+    if total_assigned != total_points:
+        diff = total_points - total_assigned
+        if diff != 0 and targets:
+            targets[-1] += diff
+    
+    return targets
+
+
+def initialize_clusters_simple(polygon: np.ndarray, num_clusters: int, 
+                              points: np.ndarray) -> np.ndarray:
+    """Простая инициализация центров кластеров"""
+    if len(points) == 0:
+        return np.array([])
+    
+    if len(points) <= num_clusters:
+        return points.copy()
+    
+    try:
+        # Пробуем использовать вершины полигона если возможно
+        if len(polygon) >= num_clusters:
+            # Выбираем равномерно распределенные точки полигона
+            indices = np.linspace(0, len(polygon) - 1, num_clusters, dtype=int)
+            return polygon[indices]
+        else:
+            # Случайные точки из данных
+            np.random.seed(42)  # Для воспроизводимости
+            indices = np.random.choice(len(points), num_clusters, replace=False)
+            return points[indices]
+    except:
+        # Fallback: первые num_clusters точек
+        return points[:num_clusters]
+
+
+def simple_balanced_kmeans(points: np.ndarray, point_ids: List[str], 
+                          num_clusters: int, initial_centers: np.ndarray,
+                          weekly_targets: List[int], logger: Callable) -> Tuple[Dict, Dict]:
+    """Упрощенный балансированный k-means"""
+    n_points = len(points)
+    
+    if n_points == 0 or num_clusters <= 0:
+        return {}, {}
+    
+    # Инициализация центров
+    centers = initial_centers.copy()
+    if len(centers) < num_clusters:
+        # Дополняем если нужно
+        needed = num_clusters - len(centers)
+        if n_points >= needed:
+            indices = np.random.choice(n_points, needed, replace=False)
+            centers = np.vstack([centers, points[indices]])
+    
+    # Простой k-means
+    for iteration in range(30):  # Максимум 30 итераций
+        # Шаг 1: Назначение точек по ближайшему центру
+        assignments = np.zeros(n_points, dtype=int)
+        for i, point in enumerate(points):
+            distances = np.sqrt(np.sum((centers - point) ** 2, axis=1))
+            assignments[i] = np.argmin(distances)
+        
+        # Шаг 2: Балансировка
+        assignments = simple_balance_assignments(assignments, weekly_targets, points, centers)
+        
+        # Шаг 3: Обновление центров
+        new_centers = centers.copy()
+        for i in range(num_clusters):
+            cluster_points = points[assignments == i]
+            if len(cluster_points) > 0:
+                new_centers[i] = np.mean(cluster_points, axis=0)
+            else:
+                # Если кластер пуст, перемещаем центр к случайной точке
+                idx = np.random.randint(0, n_points)
+                new_centers[i] = points[idx]
+        
+        # Шаг 4: Проверка сходимости
+        if np.max(np.sqrt(np.sum((centers - new_centers) ** 2, axis=1))) < 0.001:
+            break
+        
+        centers = new_centers
+    
+    # Формируем результат
+    week_assignments = {}
+    week_clusters = {}
+    
+    for week in range(num_clusters):
+        week_mask = assignments == week
+        week_point_ids = [point_ids[i] for i in range(n_points) if week_mask[i]]
+        
+        if week_point_ids:
+            week_points = points[week_mask]
+            week_assignments[week] = week_point_ids
+            
+            # Вычисляем центроид
+            centroid = np.mean(week_points, axis=0) if len(week_points) > 0 else centers[week]
+            
+            # Вычисляем компактность (среднее расстояние до центроида)
+            if len(week_points) > 0:
+                distances = np.sqrt(np.sum((week_points - centroid) ** 2, axis=1))
+                compactness = np.mean(distances)
+            else:
+                compactness = 0
+            
+            week_clusters[week] = {
+                'centroid': centroid.tolist(),
+                'size': len(week_points),
+                'compactness': float(compactness)
+            }
+    
+    return week_assignments, week_clusters
+
+
+def simple_balance_assignments(assignments: np.ndarray, targets: List[int],
+                              points: np.ndarray, centers: np.ndarray) -> np.ndarray:
+    """Простая балансировка назначений"""
+    n_clusters = len(targets)
+    current_counts = np.bincount(assignments, minlength=n_clusters)
+    
+    # Создаем копию для модификации
+    balanced = assignments.copy()
+    
+    # Для каждого кластера проверяем баланс
+    for cluster in range(n_clusters):
+        current = current_counts[cluster]
+        target = targets[cluster]
+        
+        if current > target + 3:  # Слишком много точек
+            excess = current - (target + 3)
+            cluster_indices = np.where(balanced == cluster)[0]
+            
+            # Находим самые дальние точки от центра
+            if len(cluster_indices) > 0:
+                distances = np.sqrt(np.sum((points[cluster_indices] - centers[cluster]) ** 2, axis=1))
+                # Сортируем по убыванию расстояния
+                far_indices = cluster_indices[np.argsort(distances)[::-1]]
+                
+                # Перемещаем excess самых дальних точек
+                moved = 0
+                for idx in far_indices:
+                    if moved >= excess:
+                        break
+                    
+                    # Находим ближайший другой кластер с дефицитом
+                    point = points[idx]
+                    best_new_cluster = -1
+                    best_dist = float('inf')
+                    
+                    for other_cluster in range(n_clusters):
+                        if other_cluster == cluster:
+                            continue
+                        if current_counts[other_cluster] < targets[other_cluster]:
+                            dist = np.sqrt(np.sum((point - centers[other_cluster]) ** 2))
+                            if dist < best_dist:
+                                best_dist = dist
+                                best_new_cluster = other_cluster
+                    
+                    if best_new_cluster != -1:
+                        balanced[idx] = best_new_cluster
+                        current_counts[cluster] -= 1
+                        current_counts[best_new_cluster] += 1
+                        moved += 1
+    
+    return balanced
+
+
+def attach_outliers_simple(outlier_points: np.ndarray, outlier_ids: List[str],
+                          week_clusters: Dict, week_assignments: Dict) -> Dict:
+    """Прикрепление выбросов к ближайшим кластерам"""
+    if len(outlier_points) == 0:
+        return week_assignments
+    
+    for i, point in enumerate(outlier_points):
+        point_id = outlier_ids[i]
+        min_dist = float('inf')
+        best_week = -1
+        
+        # Находим ближайший кластер
+        for week, cluster_info in week_clusters.items():
+            centroid = np.array(cluster_info['centroid'])
+            dist = np.sqrt(np.sum((point - centroid) ** 2))
+            if dist < min_dist:
+                min_dist = dist
+                best_week = week
+        
+        # Добавляем точку к ближайшему кластеру
+        if best_week != -1:
+            if best_week not in week_assignments:
+                week_assignments[best_week] = []
+            week_assignments[best_week].append(point_id)
+    
+    return week_assignments
+
+
+def fallback_geographic_split(points_coords: List[List[float]], 
+                             point_ids: List[str], 
+                             num_weeks: int, 
+                             coefficients: List[float]) -> Tuple[Dict, Dict]:
+    """Фолбэк: простое географическое разбиение"""
+    if not points_coords or not point_ids or num_weeks <= 0:
+        return {}, {}
+    
+    try:
+        points_np = np.array(points_coords, dtype=float)
+    except:
+        return {}, {}
+    
+    # Сортируем по широте (север-юг), затем по долготе (запад-восток)
+    if len(points_np) > 0:
+        # Используем устойчивую сортировку
+        sorted_indices = np.lexsort((points_np[:, 1], points_np[:, 0]))  # lat, lon
+    else:
+        return {}, {}
+    
+    week_assignments = {}
+    week_clusters = {}
+    
+    points_per_week = len(points_coords) // num_weeks
+    remainder = len(points_coords) % num_weeks
+    
+    start_idx = 0
+    for week in range(num_weeks):
+        week_size = points_per_week + (1 if week < remainder else 0)
+        end_idx = min(start_idx + week_size, len(points_coords))
+        
+        if start_idx < len(points_coords):
+            week_indices = sorted_indices[start_idx:end_idx]
+            week_point_ids = [point_ids[idx] for idx in week_indices]
+            
+            week_assignments[week] = week_point_ids
+            
+            # Вычисляем центроид
+            if len(week_indices) > 0:
+                week_points = points_np[week_indices]
+                centroid = np.mean(week_points, axis=0)
+                week_clusters[week] = {
+                    'centroid': centroid.tolist(),
+                    'size': len(week_points),
+                    'compactness': 0.0
+                }
+            
+            start_idx = end_idx
+    
+    return week_assignments, week_clusters
+
+
+# ==============================================
+# ОБНОВЛЕННАЯ ФУНКЦИЯ create_weekly_route_schedule
+# ==============================================
+
+def create_weekly_route_schedule(points_df, points_assignment_df, auditors_df, 
+                                 year, quarter, use_enhanced_split=False):
+    """
+    Создает ежедневные маршруты для аудиторов в формате EasyMerch
+    """
+    
+    # Импорты внутри функции для безопасности
+    from datetime import datetime, timedelta
+    import pandas as pd
+    
+    if points_df is None or points_df.empty:
+        return pd.DataFrame()
+    
+    if points_assignment_df is None or points_assignment_df.empty:
+        return pd.DataFrame()
+    
+    # 1. Получаем рабочие дни квартала
+    working_days = get_working_days_for_quarter(year, quarter)
+    
+    if not working_days:
+        st.warning(f"⚠️ В {year} квартале {quarter} нет рабочих дней")
+        return pd.DataFrame()
+    
+    # Получаем недели (нужна для обоих вариантов)
+    weeks_info = get_weeks_in_quarter(year, quarter)
+    num_weeks = len(weeks_info)
+    
+    # Создаем словарь для быстрого доступа к неделям по номеру
+    weeks_dict = {i: weeks_info[i] for i in range(num_weeks)}
+    
+    all_visits = []
+    
+    # 2. Для каждого аудитора создаем маршруты
+    for auditor in auditors_df['ID_Сотрудника'].unique():
+        # Находим точки этого аудитора
+        auditor_point_ids = points_assignment_df[
+            points_assignment_df['Аудитор'] == auditor
+        ]['ID_Точки'].tolist()
+        
+        if not auditor_point_ids:
+            continue
+        
+        # Получаем данные точек
+        auditor_points_data = points_df[
+            points_df['ID_Точки'].isin(auditor_point_ids)
+        ]
+        
+        if auditor_points_data.empty:
+            continue
+        
+        # ============================================
+        # НОВАЯ ЛОГИКА: разбиение полигона по неделям (только если включено)
+        # ============================================
+        if use_enhanced_split and 'polygons' in st.session_state:
+            enhanced_success = False
+            
+            try:
+                # Находим полигон аудитора
+                polygon_info = None
+                polygon_name = None
+                for poly_name, poly_info in st.session_state.polygons.items():
+                    if poly_info.get('auditor') == auditor:
+                        polygon_info = poly_info
+                        polygon_name = poly_name
+                        break
+                
+                if polygon_info and polygon_info.get('coordinates'):
+                    # Подготавливаем данные для разбиения
+                    polygon_coords = polygon_info['coordinates']
+                    points_coords = []
+                    point_ids_list = []
+                    
+                    for _, row in auditor_points_data.iterrows():
+                        point_id = str(row['ID_Точки'])
+                        try:
+                            lat = float(row['Широта'])
+                            lon = float(row['Долгота'])
+                            
+                            # Учитываем количество посещений
+                            visits_needed = int(row.get('Кол-во_посещений', 1))
+                            for _ in range(visits_needed):
+                                points_coords.append([lat, lon])
+                                point_ids_list.append(point_id)
+                        except (ValueError, TypeError):
+                            continue
+                    
+                    if len(points_coords) > 0 and len(polygon_coords) >= 3:
+                        # Коэффициенты из настроек
+                        coefficients = [
+                            st.session_state.get('sidebar_stage1', 0.8),
+                            st.session_state.get('sidebar_stage2', 1.0),
+                            st.session_state.get('sidebar_stage3', 1.2),
+                            st.session_state.get('sidebar_stage4', 0.9)
+                        ]
+                        
+                        # Простой logger без st внутри
+                        log_messages = []
+                        def simple_logger(msg):
+                            log_messages.append(f"{auditor}: {msg}")
+                        
+                        # Разбиваем полигон по неделям
+                        week_assignment, week_clusters = split_polygon_by_weeks(
+                            polygon_coords=polygon_coords,
+                            points_coords=points_coords,
+                            point_ids=point_ids_list,
+                            num_weeks=num_weeks,
+                            coefficients=coefficients,
+                            polygon_name=polygon_name,
+                            auditor_id=auditor,
+                            logger=simple_logger
+                        )
+                        
+                        # Показываем логи
+                        for msg in log_messages[-5:]:  # Последние 5 сообщений
+                            st.info(msg)
+                        
+                        if week_assignment:
+                            # Создаем маршруты для каждой недели
+                            for week_key, week_point_ids in week_assignment.items():
+                                if not week_point_ids:
+                                    continue
+                                
+                                # Преобразуем week_key в индекс (0-based)
+                                try:
+                                    week_idx = int(week_key)
+                                    if week_idx >= num_weeks:
+                                        continue
+                                except (ValueError, TypeError):
+                                    continue
+                                
+                                # Фильтруем точки этой недели
+                                week_points_data = auditor_points_data[
+                                    auditor_points_data['ID_Точки'].isin(week_point_ids)
+                                ]
+                                
+                                if week_points_data.empty:
+                                    continue
+                                
+                                # Преобразуем в список словарей
+                                week_points_list = []
+                                for _, row in week_points_data.iterrows():
+                                    visits_needed = int(row.get('Кол-во_посещений', 1))
+                                    for _ in range(visits_needed):
+                                        week_points_list.append({
+                                            'ID_Точки': row['ID_Точки'],
+                                            'Широта': float(row['Широта']),
+                                            'Долгота': float(row['Долгота']),
+                                            'Название_Точки': row.get('Название_Точки', str(row['ID_Точки'])),
+                                            'Адрес': row.get('Адрес', ''),
+                                            'Тип': row.get('Тип', 'Неизвестно')
+                                        })
+                                
+                                # Находим даты этой недели
+                                week_info = weeks_dict.get(week_idx)
+                                if week_info:
+                                    week_start = week_info['start_date']
+                                    week_end = week_info['end_date']
+                                    
+                                    # Все дни недели
+                                    week_dates = []
+                                    current_date = week_start
+                                    while current_date <= week_end:
+                                        week_dates.append(current_date)
+                                        current_date += timedelta(days=1)
+                                    
+                                    if week_dates:
+                                        # Создаем маршруты для этой недели
+                                        weekly_visits = create_daily_routes_for_auditor(
+                                            week_points_list, week_dates, auditor
+                                        )
+                                        if weekly_visits:
+                                            all_visits.extend(weekly_visits)
+                            
+                            enhanced_success = True
+                            if week_assignment:
+                                st.success(f"✅ {auditor}: разбито на {len(week_assignment)} недель")
+                
+            except Exception as e:
+                st.warning(f"⚠️ {auditor}: ошибка улучшенного разбиения: {str(e)[:100]}")
+                enhanced_success = False
+            
+            if enhanced_success:
+                continue  # Переходим к следующему аудитору
+        
+        # ============================================
+        # СТАРАЯ ЛОГИКА (работает всегда как fallback)
+        # ============================================
+        # Преобразуем в список словарей с учетом количества посещений
+        auditor_points = []
+        for _, row in auditor_points_data.iterrows():
+            visits_needed = int(row.get('Кол-во_посещений', 1))
+            
+            for _ in range(visits_needed):
+                auditor_points.append({
+                    'ID_Точки': row['ID_Точки'],
+                    'Широта': float(row['Широта']),
+                    'Долгота': float(row['Долгота']),
+                    'Название_Точки': row.get('Название_Точки', str(row['ID_Точки'])),
+                    'Адрес': row.get('Адрес', ''),
+                    'Тип': row.get('Тип', 'Неизвестно')
+                })
+        
+        # Создаем ежедневные маршруты
+        daily_visits = create_daily_routes_for_auditor(
+            auditor_points, working_days, auditor
+        )
+        if daily_visits:
+            all_visits.extend(daily_visits)
+    
+    # 3. Преобразуем в DataFrame
+    if not all_visits:
+        return pd.DataFrame()
+    
+    results_df = pd.DataFrame(all_visits)
+    
+    # 4. Группируем по неделям для формата EasyMerch
+    # Функция get_iso_week должна быть определена выше в коде
+    results_df['Неделя'] = results_df['Дата'].apply(lambda d: d.isocalendar()[1])
+    results_df['Дата_начала_недели'] = results_df['Дата'].apply(
+        lambda d: d - timedelta(days=d.weekday())
+    )
+    
+    # 5. Создаем финальную таблицу в формате EasyMerch
+    final_rows = []
+    
+    # Группируем по точкам и неделям
+    grouped = results_df.groupby(['ID_Точки', 'Неделя', 'Аудитор'])
+    
+    for (point_id, week_num, auditor), group in grouped:
+        # Находим информацию о точке
+        point_mask = points_df['ID_Точки'] == point_id
+        if not point_mask.any():
+            continue
+            
+        point_info = points_df[point_mask].iloc[0]
+        
+        # Количество визитов на этой неделе
+        visits_this_week = len(group)
+        
+        # Дни недели когда есть визиты
+        days_visited = set(group['День_недели'].tolist())
+        
+        # Дата начала недели (понедельник)
+        week_start_date = group['Дата_начала_недели'].iloc[0]
+        
+        # Преобразуем в строку YYYYMMDD
+        if isinstance(week_start_date, (datetime, pd.Timestamp)):
+            start_date_str = week_start_date.strftime('%Y%m%d')
+        else:
+            start_date_str = str(week_start_date).replace('-', '')
+        
+        # Получаем координаты
+        try:
+            latitude = float(point_info.get('Широта', 0))
+            longitude = float(point_info.get('Долгота', 0))
+        except (ValueError, TypeError):
+            latitude = 0
+            longitude = 0
+        
+        # Создаем строку
+        row = {
+            'Address': point_info.get('Адрес', ''),
+            'L1 Name': point_info.get('Название_Точки', str(point_id)),
+            'ЧИСЛО визитов в НЕДЕЛЮ': visits_this_week,
+            'Login пользователя': auditor,
+            'Понедельник': 1 if 0 in days_visited else '',
+            'Вторник': 1 if 1 in days_visited else '',
+            'Среда': 1 if 2 in days_visited else '',
+            'Четверг': 1 if 3 in days_visited else '',
+            'Пятница': 1 if 4 in days_visited else '',
+            'Суббота': 1 if 5 in days_visited else '',
+            'Воскресенье': 1 if 6 in days_visited else '',
+            'Цикл посещения': week_num,
+            'Дата начала цикла посещения': start_date_str,
+            'Широта': f"{latitude:.6f}",
+            'Долгота': f"{longitude:.6f}"
+        }
+        
+        final_rows.append(row)
+    
+    if not final_rows:
+        return pd.DataFrame()
+    
+    final_df = pd.DataFrame(final_rows)
+    
+    # Сортируем
+    final_df = final_df.sort_values(['Login пользователя', 'Дата начала цикла посещения', 'L1 Name'])
+    
+    return final_df
+
 
 
 
