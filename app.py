@@ -1586,6 +1586,11 @@ def create_weekly_route_schedule(points_df, points_assignment_df, auditors_df,
                             st.success(f"✅ Создано {len(weekly_visits)} визитов")
                         else:
                             st.warning(f"⚠️ Не создано ни одного визита для недели {week_idx}")
+                    
+            except Exception as e:
+                st.error(f"❌ {auditor}: ошибка: {str(e)[:100]}")
+            continue
+    
     
     
     # ============================================
@@ -3857,6 +3862,7 @@ if st.session_state.plan_calculated:
                   f"{len(st.session_state.auditors_df) if st.session_state.auditors_df is not None else 0} аудиторов")
     
     current_tab += 1
+
 
 
 
