@@ -683,6 +683,17 @@ def simple_cluster_points(points, n_clusters):
     return clusters
 
 def create_daily_routes_for_auditor(auditor_points, working_days, auditor_id):
+
+        # ДИАГНОСТИКА
+    print(f"=== create_daily_routes_for_auditor ===")
+    print(f"Аудитор: {auditor_id}")
+    print(f"Получено точек: {len(auditor_points)}")
+    print(f"Получено рабочих дней: {len(working_days)}")
+    print(f"Дни недели: {[d.strftime('%Y-%m-%d (%a)') for d in working_days]}")
+    
+    if not auditor_points or not working_days:
+        print("❌ Пустые входные данные!")
+        return []
     """
     УНИВЕРСАЛЬНЫЙ АЛГОРИТМ ДЛЯ ГОРОДОВ-МИЛЛИОННИКОВ РОССИИ
     С ПРОСТЫМ ГЕОГРАФИЧЕСКИМ РАЙОНИРОВАНИЕМ
@@ -1339,7 +1350,7 @@ def split_polygon_by_weeks(polygon_coords, points_coords, point_ids, num_weeks,
 # ==============================================
 
 def create_weekly_route_schedule(points_df, points_assignment_df, auditors_df, 
-                                 year, quarter, use_enhanced_split=False):
+                                 year, quarter, use_enhanced_split=True):
 
     # ========== ДИАГНОСТИКА ==========
     st.info("=== ДИАГНОСТИКА НАЧАТА ===")
@@ -1434,35 +1445,37 @@ def create_weekly_route_schedule(points_df, points_assignment_df, auditors_df,
                                 'Тип': row.get('Тип', 'Неизвестно')
                             })
                     
-                    # Распределяем по неделям простым способом
-                    for week_idx in range(num_weeks):
-                        week_info = weeks_dict.get(week_idx)
-                        if not week_info:
-                            continue
-                        
-                        week_start = week_info['start_date']
-                        week_end = week_info['end_date']
-                        
-                       # Только рабочие дни (Пн-Пт)
-                        working_days_this_week = []
-                        current_date = week_start
-                        while current_date <= week_end:
-                            if current_date.weekday() < 5:  # 0=Пн, 4=Пт
-                                working_days_this_week.append(current_date)
-                            current_date += timedelta(days=1)
-                        
-                        if working_days_this_week:
-                            st.info(f"📅 Неделя {week_idx}: {len(working_days_this_week)} рабочих дней")
+                    
+                        # Распределяем по неделям простым способом
+                        for week_idx in range(num_weeks):
+                            week_info = weeks_dict.get(week_idx)
+                            if not week_info:
+                                continue
                             
-                            weekly_visits = create_daily_routes_for_auditor(
-                                week_points_list, working_days_this_week, auditor
-                            )
+                            week_start = week_info['start_date']
+                            week_end = week_info['end_date']
                             
-                            if weekly_visits:
-                                all_visits.extend(weekly_visits)
-                                st.success(f"✅ Создано {len(weekly_visits)} визитов")
-                            else:
-                                st.warning(f"⚠️ Не создано ни одного визита для недели {week_idx}")
+                            # Только рабочие дни (Пн-Пт)
+                            working_days_this_week = []
+                            current_date = week_start
+                            while current_date <= week_end:
+                                if current_date.weekday() < 5:  # 0=Пн, 4=Пт
+                                    working_days_this_week.append(current_date)
+                                current_date += timedelta(days=1)
+                            
+                            if working_days_this_week:
+                                st.info(f"📅 Неделя {week_idx}: {len(working_days_this_week)} рабочих дней")
+                                
+                                weekly_visits = create_daily_routes_for_auditor(
+                                    week_points_list, working_days_this_week, auditor
+                                )
+                                
+                                if weekly_visits:
+                                    all_visits.extend(weekly_visits)
+                                    st.success(f"✅ Создано {len(weekly_visits)} визитов")
+                                else:
+                                    st.warning(f"⚠️ Не создано ни одного визита для недели {week_idx}")
+                        continue
                 
                 # Подготавливаем данные для разбиения
                 polygon_coords = polygon_info['coordinates']
@@ -1510,12 +1523,12 @@ def create_weekly_route_schedule(points_df, points_assignment_df, auditors_df,
                 if not week_assignment:
                     st.warning(f"⚠️ {auditor}: не удалось разбить полигон")
                     continue
-                
-                # Создаем маршруты для каждой недели
+                               # Создаем маршруты для каждой недели
                 for week_key, week_point_ids in week_assignment.items():
                     if not week_point_ids:
                         continue
                     
+                    # Преобразуем week_key в индекс (0-based)
                     try:
                         week_idx = int(week_key)
                         if week_idx >= num_weeks:
@@ -1523,6 +1536,7 @@ def create_weekly_route_schedule(points_df, points_assignment_df, auditors_df,
                     except (ValueError, TypeError):
                         continue
                     
+                    # Фильтруем точки этой недели
                     week_points_data = auditor_points_data[
                         auditor_points_data['ID_Точки'].isin(week_point_ids)
                     ]
@@ -1544,6 +1558,7 @@ def create_weekly_route_schedule(points_df, points_assignment_df, auditors_df,
                                 'Тип': row.get('Тип', 'Неизвестно')
                             })
                     
+                    # Находим даты этой недели
                     week_info = weeks_dict.get(week_idx)
                     if not week_info:
                         continue
@@ -1551,8 +1566,7 @@ def create_weekly_route_schedule(points_df, points_assignment_df, auditors_df,
                     week_start = week_info['start_date']
                     week_end = week_info['end_date']
                     
-                    
- # Только рабочие дни (Пн-Пт)
+                    # Только рабочие дни (Пн-Пт)
                     working_days_this_week = []
                     current_date = week_start
                     while current_date <= week_end:
@@ -1572,10 +1586,6 @@ def create_weekly_route_schedule(points_df, points_assignment_df, auditors_df,
                             st.success(f"✅ Создано {len(weekly_visits)} визитов")
                         else:
                             st.warning(f"⚠️ Не создано ни одного визита для недели {week_idx}")
-                
-            except Exception as e:
-                st.error(f"❌ {auditor}: ошибка: {str(e)[:100]}")
-                continue
     
     
     # ============================================
@@ -3847,6 +3857,7 @@ if st.session_state.plan_calculated:
                   f"{len(st.session_state.auditors_df) if st.session_state.auditors_df is not None else 0} аудиторов")
     
     current_tab += 1
+
 
 
 
