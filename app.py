@@ -1438,7 +1438,7 @@ def create_weekly_route_schedule(points_df, points_assignment_df, auditors_df,
                         for _ in range(visits_needed):
                             week_points_list.append({
                                 'ID_Точки': row['ID_Точки'],
-                                'Широта': float(row['Широta']),
+                                'Широта': float(row['Широтa']),
                                 'Долгота': float(row['Долгота']),
                                 'Название_Точки': row.get('Название_Точки', str(row['ID_Точки'])),
                                 'Адрес': row.get('Адрес', ''),
@@ -1455,12 +1455,14 @@ def create_weekly_route_schedule(points_df, points_assignment_df, auditors_df,
                             week_start = week_info['start_date']
                             week_end = week_info['end_date']
                             
-                            # Только рабочие дни (Пн-Пт)
+                            # Только рабочие дни (Пн-Пт) - ИСПРАВЛЕНИЕ
                             working_days_this_week = []
                             current_date = week_start
                             while current_date <= week_end:
-                                if current_date.weekday() < 5:  # 0=Пн, 4=Пт
-                                    working_days_this_week.append(current_date)
+                                # Проверяем что это datetime/date объект и день недели 0-4 (Пн-Пт)
+                                if hasattr(current_date, 'weekday'):
+                                    if current_date.weekday() < 5:  # 0=Пн, 4=Пт
+                                        working_days_this_week.append(current_date)
                                 current_date += timedelta(days=1)
                             
                             if working_days_this_week:
@@ -1475,6 +1477,8 @@ def create_weekly_route_schedule(points_df, points_assignment_df, auditors_df,
                                     st.success(f"✅ Создано {len(weekly_visits)} визитов")
                                 else:
                                     st.warning(f"⚠️ Не создано ни одного визита для недели {week_idx}")
+                            else:
+                                st.warning(f"⚠️ В неделе {week_idx} нет рабочих дней")
                         continue
                 
                 # Подготавливаем данные для разбиения
@@ -1524,16 +1528,22 @@ def create_weekly_route_schedule(points_df, points_assignment_df, auditors_df,
                     st.warning(f"⚠️ {auditor}: не удалось разбить полигон")
                     continue
                                # Создаем маршруты для каждой недели
-                for week_key, week_point_ids in week_assignment.items():
+                for iso_week_num, week_point_ids in week_assignment.items():
                     if not week_point_ids:
                         continue
                     
-                    # Преобразуем week_key в индекс (0-based)
-                    try:
-                        week_idx = int(week_key)
-                        if week_idx >= num_weeks:
-                            continue
-                    except (ValueError, TypeError):
+                    # Находим неделю с таким ISO номером
+                    week_info = None
+                    week_idx = None
+                    
+                    for idx, w_info in weeks_dict.items():
+                        if w_info['iso_week_number'] == int(iso_week_num):
+                            week_info = w_info
+                            week_idx = idx
+                            break
+                    
+                    if not week_info:
+                        st.warning(f"{auditor}: Не найдена неделя с ISO номером {iso_week_num}")
                         continue
                     
                     # Фильтруем точки этой недели
@@ -3862,6 +3872,7 @@ if st.session_state.plan_calculated:
                   f"{len(st.session_state.auditors_df) if st.session_state.auditors_df is not None else 0} аудиторов")
     
     current_tab += 1
+
 
 
 
