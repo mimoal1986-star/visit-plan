@@ -284,6 +284,356 @@ def get_cell_neighbors(cell_key, grid):
         return []
 
 # ==============================================
+# УПРОЩЕННЫЕ ФУНКЦИИ ДЛЯ АЛГОРИТМА КЛАСТЕРИЗАЦИИ (ЭТАП 2)
+# ==============================================
+
+def find_initial_boundary_simple(grid, polygon_coords):
+    """
+    Упрощенный поиск граничных ячеек.
+    Граничная = имеет хотя бы одного соседа, которого нет в сетке.
+    """
+    if not grid or not polygon_coords:
+        return set()
+    
+    boundary_cells = set()
+    cell_index = grid.get('cell_index', {})
+    
+    for cell_key in cell_index.keys():
+        try:
+            x, y = map(int, cell_key.split('_'))
+            
+            # Проверяем 4 соседа
+            neighbors = [
+                f"{x}_{y+1}",  # север
+                f"{x}_{y-1}",  # юг  
+                f"{x+1}_{y}",  # восток
+                f"{x-1}_{y}",  # запад
+            ]
+            
+            # Если хоть один сосед отсутствует в сетке - ячейка граничная
+            for neighbor_key in neighbors:
+                if neighbor_key not in cell_index:
+                    boundary_cells.add(cell_key)
+                    break
+                    
+        except (ValueError, AttributeError):
+            continue
+    
+    return boundary_cells
+
+def sort_boundary_by_northwest(boundary_cells, grid):
+    """
+    Сортирует граничные ячейки от северо-запада к юго-востоку.
+    """
+    if not boundary_cells:
+        return []
+    
+    cells_with_coords = []
+    cell_index = grid.get('cell_index', {})
+    
+    for cell_key in boundary_cells:
+        if cell_key in cell_index:
+            cell = cell_index[cell_key]
+            cells_with_coords.append({
+                'key': cell_key,
+                'x': cell['grid_x'],
+                'y': cell['grid_y'],
+                'lat': cell['center'][0],
+                'lon': cell['center'][1]
+            })
+    
+    if not cells_with_coords:
+        return []
+    
+    # Сортируем: сначала по широте (север → юг), потом по долготе (запад → восток)
+    sorted_cells = sorted(cells_with_coords, 
+                         key=lambda c: (-c['lat'], c['lon']))
+    
+    return [cell['key'] for cell in sorted_cells]
+
+def find_next_start_cell_simple(ordered_boundary, used_cells):
+    """
+    Упрощенный поиск стартовой ячейки.
+    """
+    if not ordered_boundary:
+        return None
+    
+    for cell_key in ordered_boundary:
+        if cell_key not in used_cells:
+            return cell_key
+    
+    return None
+
+def update_boundary_simple(boundary_cells, cluster_cells, grid):
+    """
+    Упрощенное обновление границы.
+    """
+    if not boundary_cells:
+        return set()
+    
+    # Удаляем использованные ячейки
+    new_boundary = set(boundary_cells)
+    new_boundary.difference_update(cluster_cells)
+    
+    cell_index = grid.get('cell_index', {})
+    
+    # Для каждой ячейки кластера проверяем ее соседей
+    for cell_key in cluster_cells:
+        try:
+            x, y = map(int, cell_key.split('_'))
+            
+            neighbors = [
+                f"{x}_{y+1}",  # север
+                f"{x}_{y-1}",  # юг
+                f"{x+1}_{y}",  # восток  
+                f"{x-1}_{y}",  # запад
+            ]
+            
+            for neighbor_key in neighbors:
+                # Если сосед в сетке и еще не в границе и не в кластере
+                if (neighbor_key in cell_index and 
+                    neighbor_key not in new_boundary and
+                    neighbor_key not in cluster_cells):
+                    new_boundary.add(neighbor_key)
+                    
+        except (ValueError, AttributeError):
+            continue
+    
+    return new_boundary
+
+def get_cell_neighbors_4(cell_key):
+    """
+    Возвращает 4 соседа ячейки (север, юг, восток, запад).
+    """
+    try:
+        x, y = map(int, cell_key.split('_'))
+        return [
+            f"{x}_{y+1}",  # север
+            f"{x}_{y-1}",  # юг
+            f"{x+1}_{y}",  # восток
+            f"{x-1}_{y}",  # запад
+        ]
+    except (ValueError, AttributeError):
+        return []
+
+def find_additional_cells(grid, used_cells, polygon_coords, needed_points):
+    """
+    Ищет дополнительные ячейки для завершения кластера.
+    """
+    additional_cells = []
+    cell_index = grid.get('cell_index', {})
+    
+    # Ищем все неиспользованные ячейки
+    for cell_key, cell in cell_index.items():
+        if cell_key in used_cells:
+            continue
+        
+        # Проверяем что ячейка внутри полигона
+        cell_center = cell['center']
+        if is_point_in_polygon(cell_center, polygon_coords):
+            additional_cells.append(cell_key)
+        
+        if len(additional_cells) >= needed_points * 2:  # Берем с запасом
+            break
+    
+    return additional_cells
+
+def build_simple_cluster(start_cell_key, target_points, grid, cell_to_points, used_cells, polygon_coords, logger=None):
+    """
+    Строит простой кластер, начиная с заданной ячейки.
+    Алгоритм BFS (поиск в ширину) от стартовой ячейки.
+    """
+    if start_cell_key in used_cells:
+        if logger:
+            logger(f"Стартовая ячейка {start_cell_key} уже использована")
+        return [], []
+    
+    if start_cell_key not in grid.get('cell_index', {}):
+        if logger:
+            logger(f"Стартовая ячейка {start_cell_key} не существует в сетке")
+        return [], []
+    
+    cluster_cells = []
+    cluster_points = []
+    
+    # Очередь для BFS
+    queue = [start_cell_key]
+    visited = set([start_cell_key])
+    
+    while queue and len(cluster_points) < target_points:
+        # Берем следующую ячейку из очереди
+        cell_key = queue.pop(0)
+        
+        if cell_key in used_cells:
+            continue
+        
+        # Добавляем ячейку в кластер
+        cluster_cells.append(cell_key)
+        used_cells.add(cell_key)
+        
+        # Добавляем точки из этой ячейки
+        if cell_key in cell_to_points:
+            cluster_points.extend(cell_to_points[cell_key])
+        
+        # Если набрали достаточно точек - останавливаемся
+        if len(cluster_points) >= target_points:
+            break
+        
+        # Добавляем соседей этой ячейки в очередь (BFS)
+        neighbors = get_cell_neighbors_4(cell_key)
+        for neighbor_key in neighbors:
+            # Проверяем что сосед существует, не использован и не посещен
+            if (neighbor_key in grid['cell_index'] and 
+                neighbor_key not in used_cells and
+                neighbor_key not in visited):
+                
+                # Проверяем что ячейка внутри полигона
+                neighbor_cell = grid['cell_index'][neighbor_key]
+                if is_point_in_polygon(neighbor_cell['center'], polygon_coords):
+                    queue.append(neighbor_key)
+                    visited.add(neighbor_key)
+    
+    # Если не набрали достаточно точек, ищем дополнительные ячейки
+    if len(cluster_points) < target_points:
+        needed = target_points - len(cluster_points)
+        additional_cells = find_additional_cells(grid, used_cells, polygon_coords, needed)
+        
+        for cell_key in additional_cells:
+            if cell_key in used_cells:
+                continue
+            
+            cluster_cells.append(cell_key)
+            used_cells.add(cell_key)
+            
+            if cell_key in cell_to_points:
+                cluster_points.extend(cell_to_points[cell_key])
+            
+            if len(cluster_points) >= target_points:
+                break
+    
+    if logger:
+        logger(f"Создан кластер: {len(cluster_cells)} ячеек, {len(cluster_points)} точек")
+    
+    # Обрезаем если перебор (берем ровно target_points)
+    return cluster_cells, cluster_points[:target_points] if cluster_points else []
+
+def cluster_from_perimeter_to_center_simple(polygon_coords, grid, cell_to_points, weekly_targets, logger=None):
+    """
+    Упрощенный алгоритм кластеризации "от границы к центру".
+    """
+    if logger:
+        logger(f"Начинаем кластеризацию: {len(weekly_targets)} недель")
+    
+    # 1. Проверка входных данных
+    if not polygon_coords or not grid or not cell_to_points or not weekly_targets:
+        if logger:
+            logger("❌ Недостаточно данных для кластеризации")
+        return {}
+    
+    total_points = sum(len(pts) for pts in cell_to_points.values())
+    total_target = sum(weekly_targets)
+    
+    if total_points < total_target:
+        if logger:
+            logger(f"⚠️ Предупреждение: точек ({total_points}) меньше чем цель ({total_target})")
+    
+    # 2. Инициализация
+    week_assignment = {}
+    used_cells = set()
+    
+    # 3. Находим начальную границу
+    boundary_cells = find_initial_boundary_simple(grid, polygon_coords)
+    
+    if not boundary_cells:
+        if logger:
+            logger("⚠️ Нет граничных ячеек")
+        return {}
+    
+    # 4. Сортируем границу
+    ordered_boundary = sort_boundary_by_northwest(boundary_cells, grid)
+    
+    if logger:
+        logger(f"Найдено {len(boundary_cells)} граничных ячеек")
+    
+    # 5. Создаем кластеры для каждой недели
+    for week_idx, target_points in enumerate(weekly_targets):
+        if target_points <= 0:
+            if logger:
+                logger(f"Неделя {week_idx}: цель = 0 точек, пропускаем")
+            week_assignment[str(week_idx)] = []
+            continue
+        
+        if logger:
+            logger(f"Неделя {week_idx}: цель = {target_points} точек")
+        
+        # Находим ячейку для старта кластера
+        start_cell = find_next_start_cell_simple(ordered_boundary, used_cells)
+        
+        if not start_cell:
+            if logger:
+                logger(f"⚠️ Неделя {week_idx}: нет доступных ячеек для старта")
+            week_assignment[str(week_idx)] = []
+            break
+        
+        # Создаем кластер
+        cluster_cells, cluster_points = build_simple_cluster(
+            start_cell, target_points, grid, cell_to_points, 
+            used_cells, polygon_coords, logger
+        )
+        
+        # Сохраняем результат (даже если пустой)
+        week_assignment[str(week_idx)] = cluster_points
+        
+        if cluster_cells:
+            used_cells.update(cluster_cells)
+            
+            # Обновляем границу
+            ordered_boundary = list(update_boundary_simple(set(ordered_boundary), cluster_cells, grid))
+            
+            if logger:
+                logger(f"✅ Неделя {week_idx}: создан кластер из {len(cluster_points)} точек")
+        else:
+            if logger:
+                logger(f"⚠️ Неделя {week_idx}: не удалось создать кластер")
+    
+    # 6. Проверяем результат
+    total_assigned = sum(len(pts) for pts in week_assignment.values())
+    
+    if logger:
+        logger(f"Итог: распределено {total_assigned} из {total_points} точек")
+        
+        # Логируем распределение по неделям
+        for week_idx, points in week_assignment.items():
+            logger(f"  Неделя {week_idx}: {len(points)} точек")
+    
+    return week_assignment
+
+def fallback_simple_distribution(point_ids, num_weeks):
+    """
+    Простое распределение точек по неделям (fallback).
+    """
+    if not point_ids or num_weeks <= 0:
+        return {}
+    
+    week_assignment = {}
+    points_per_week = len(point_ids) // num_weeks
+    remainder = len(point_ids) % num_weeks
+    
+    start_idx = 0
+    for week in range(num_weeks):
+        week_size = points_per_week + (1 if week < remainder else 0)
+        end_idx = start_idx + week_size
+        
+        if start_idx < len(point_ids):
+            week_assignment[str(week)] = point_ids[start_idx:end_idx]
+            start_idx = end_idx
+        else:
+            week_assignment[str(week)] = []
+    
+    return week_assignment
+
+
+# ==============================================
 # БОКОВАЯ ПАНЕЛЬ - НАСТРОЙКИ
 # ==============================================
 
@@ -4186,11 +4536,79 @@ if st.sidebar.checkbox("🧪 Тест геометрических функци�
         else:
             st.sidebar.error("❌ Не удалось создать сетку")
 
+
+
+# ==============================================
+# ТЕСТОВАЯ СЕКЦИЯ ДЛЯ ЭТАПА 2 (добавить в конец файла)
+# ==============================================
+
+if st.sidebar.checkbox("🧪 Тест алгоритма кластеризации", False, key="test_clustering_func"):
+    st.sidebar.markdown("---")
+    st.sidebar.subheader("Тест кластеризации (Этап 2)")
+    
+    # Тестовый полигон
+    test_polygon = [
+        [55.5, 37.3],
+        [55.5, 37.8], 
+        [55.8, 37.8],
+        [55.8, 37.3],
+        [55.5, 37.3]
+    ]
+    
+    # Тестовые точки
+    test_points = []
+    test_ids = []
+    
+    # Создаем 50 тестовых точек внутри полигона
+    for i in range(50):
+        lat = 55.5 + (i % 10) * 0.03
+        lon = 37.3 + (i // 10) * 0.05
+        test_points.append([lat, lon])
+        test_ids.append(f"P{i:03d}")
+    
+    if st.sidebar.button("Запустить тест кластеризации", key="run_clustering_test_btn"):
+        with st.sidebar:
+            st.info("🔄 Запускаем тест...")
+            
+            # 1. Создаем сетку
+            grid = create_grid_inside_polygon(test_polygon, grid_size=0.01)
+            
+            if grid:
+                st.success(f"✅ Создана сетка: {len(grid['cells'])} ячеек")
+                
+                # 2. Распределяем точки
+                cell_to_points = assign_points_to_grid_cells(test_points, test_ids, grid)
+                st.info(f"📊 Распределено {len(test_points)} точек по {len(cell_to_points)} ячейкам")
+                
+                # 3. Тест граничных ячеек
+                boundary = find_initial_boundary_simple(grid, test_polygon)
+                st.info(f"📍 Граничных ячеек: {len(boundary)}")
+                
+                # 4. Тест сортировки
+                ordered = sort_boundary_by_northwest(boundary, grid)
+                st.info(f"📈 Упорядочено: {len(ordered)} ячеек")
+                
+                # 5. Тест кластеризации
+                weekly_targets = [10, 10, 10, 10, 10]  # 5 недель по 10 точек
+                
+                def test_logger(msg):
+                    st.write(f"📝 {msg}")
+                
+                clusters = cluster_from_perimeter_to_center_simple(
+                    test_polygon, grid, cell_to_points, weekly_targets, test_logger
+                )
+                
+                if clusters:
+                    st.success(f"✅ Создано {len(clusters)} кластеров")
+                    for week, points in clusters.items():
+                        st.write(f"Неделя {week}: {len(points)} точек")
+                else:
+                    st.error("❌ Не удалось создать кластеры")
+            else:
+                st.error("❌ Не удалось создать сетку")
 # ==============================================
 # КОНЕЦ ((удалить после реализации))
 # ==============================================
-
-
 
 
 
