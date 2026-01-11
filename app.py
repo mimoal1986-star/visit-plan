@@ -440,8 +440,7 @@ def find_additional_cells(grid, used_cells, polygon_coords, needed_points):
 
 def build_simple_cluster(start_cell_key, target_points, grid, cell_to_points, used_cells, polygon_coords, logger=None):
     """
-    Фикс: ограничиваем максимальный размер кластера.
-    Вместо 900+ ячеек для 10 точек.
+    Улучшенный BFS: увеличиваем радиус поиска.
     """
     if start_cell_key in used_cells:
         if logger:
@@ -455,38 +454,39 @@ def build_simple_cluster(start_cell_key, target_points, grid, cell_to_points, us
     
     cluster_cells = []
     cluster_points = []
+    
+    # Фаза 1: BFS поиск в радиусе
     queue = [start_cell_key]
     visited = set([start_cell_key])
     
-    # ОГРАНИЧЕНИЕ: максимум в 3 раза больше ячеек чем нужно точек
-    # Было: 207 ячеек для 10 точек → станет: максимум 30 ячеек
-    MAX_CLUSTER_SIZE = max(target_points * 3, 10)  # Минимум 10 ячеек
+    # Параметры поиска
+    MAX_SEARCH_CELLS = 200  # Максимум 200 ячеек для поиска
+    cells_with_points_found = []  # Ячейки с точками в радиусе
     
-    while queue and len(cluster_cells) < MAX_CLUSTER_SIZE and len(cluster_points) < target_points:
+    while queue and len(visited) < MAX_SEARCH_CELLS:
         cell_key = queue.pop(0)
         
-        if cell_key in used_cells:
-            continue
-        
-        # Добавляем ячейку в кластер
-        cluster_cells.append(cell_key)
-        used_cells.add(cell_key)
-        
-        # Добавляем точки из этой ячейки (если есть)
+        # Проверяем ячейку на наличие точек
+        has_points = False
         if cell_key in cell_to_points:
-            cluster_points.extend(cell_to_points[cell_key])
-            if logger and cell_to_points[cell_key]:
-                logger(f"  Ячейка {cell_key}: {len(cell_to_points[cell_key])} точек")
+            points_list = cell_to_points[cell_key]
+            if points_list and len(points_list) > 0:
+                has_points = True
         
-        # Если набрали достаточно точек - можно остановиться раньше
-        if len(cluster_points) >= target_points:
+        # Если ячейка не использована и имеет точки - добавляем
+        if has_points and cell_key not in used_cells:
+            cells_with_points_found.append(cell_key)
+        
+        # Если нашли достаточно ячеек с точками (в 2 раза больше чем нужно)
+        if len(cells_with_points_found) >= target_points * 2:
+            if logger:
+                logger(f"Нашли {len(cells_with_points_found)} ячеек с точками, останавливаем поиск")
             break
         
         # Добавляем соседей (BFS)
         neighbors = get_cell_neighbors_4(cell_key)
         for neighbor_key in neighbors:
             if (neighbor_key in grid['cell_index'] and 
-                neighbor_key not in used_cells and
                 neighbor_key not in visited):
                 
                 # Проверяем что ячейка внутри полигона
@@ -496,38 +496,86 @@ def build_simple_cluster(start_cell_key, target_points, grid, cell_to_points, us
                     visited.add(neighbor_key)
     
     if logger:
-        logger(f"Создан кластер: {len(cluster_cells)} ячеек, {len(cluster_points)} точек")
+        logger(f"BFS поиск завершен: просмотрено {len(visited)} ячеек, найдено {len(cells_with_points_found)} ячеек с точками")
     
-    # Если не набрали достаточно точек, ищем дополнительные ячейки С ТОЧКАМИ
+    # Фаза 2: Берем ячейки с точками из найденных
+    for cell_key in cells_with_points_found:
+        if len(cluster_points) >= target_points:
+            break
+        
+        if cell_key not in used_cells:
+            cluster_cells.append(cell_key)
+            cluster_points.extend(cell_to_points[cell_key])
+            used_cells.add(cell_key)
+            
+            if logger:
+                logger(f"  Добавлена ячейка {cell_key}: {len(cell_to_points[cell_key])} точек")
+    
+    # Фаза 3: Если все еще не хватает, расширяем поиск
     if len(cluster_points) < target_points:
         needed = target_points - len(cluster_points)
         if logger:
-            logger(f"Не хватает {needed} точек, ищем дополнительные ячейки...")
+            logger(f"Не хватает {needed} точек, расширяем поиск...")
         
-        # Ищем ближайшие ячейки с точками
-        additional_found = 0
-        for cell_key in grid['cell_index']:
-            if cell_key in used_cells:
-                continue
+        # Ищем ближайшие ячейки с точками ко всем ячейкам кластера
+        all_cells_in_grid = list(grid['cell_index'].keys())
+        
+        # Вычисляем "центр тяжести" текущего кластера
+        if cluster_cells:
+            # Средние координаты кластера
+            sum_lat = 0
+            sum_lon = 0
+            count = 0
             
-            # Берем только ячейки с точками
-            if cell_key in cell_to_points and cell_to_points[cell_key]:
-                # Проверяем что ячейка внутри полигона
-                cell = grid['cell_index'][cell_key]
-                if is_point_in_polygon(cell['center'], polygon_coords):
+            for cell_key in cluster_cells:
+                if cell_key in grid['cell_index']:
+                    cell = grid['cell_index'][cell_key]
+                    sum_lat += cell['center'][0]
+                    sum_lon += cell['center'][1]
+                    count += 1
+            
+            if count > 0:
+                cluster_center = (sum_lat / count, sum_lon / count)
+                
+                # Сортируем все ячейки с точками по удаленности от центра кластера
+                cells_with_distances = []
+                
+                for cell_key in all_cells_in_grid:
+                    if (cell_key in used_cells or 
+                        cell_key not in cell_to_points or 
+                        not cell_to_points[cell_key]):
+                        continue
+                    
+                    cell = grid['cell_index'][cell_key]
+                    # Проверяем что ячейка внутри полигона
+                    if is_point_in_polygon(cell['center'], polygon_coords):
+                        # Вычисляем расстояние до центра кластера
+                        try:
+                            distance = math.sqrt(
+                                (cell['center'][0] - cluster_center[0])**2 +
+                                (cell['center'][1] - cluster_center[1])**2
+                            )
+                            cells_with_distances.append((distance, cell_key))
+                        except:
+                            # Если ошибка вычисления, добавляем с большим расстоянием
+                            cells_with_distances.append((9999, cell_key))
+                
+                # Сортируем по расстоянию и берем ближайшие
+                cells_with_distances.sort()
+                
+                for distance, cell_key in cells_with_distances:
+                    if len(cluster_points) >= target_points:
+                        break
+                    
                     cluster_cells.append(cell_key)
                     cluster_points.extend(cell_to_points[cell_key])
                     used_cells.add(cell_key)
-                    additional_found += len(cell_to_points[cell_key])
                     
                     if logger:
-                        logger(f"  Добавлена ячейка {cell_key}: {len(cell_to_points[cell_key])} точек")
-                    
-                    if len(cluster_points) >= target_points:
-                        break
-        
-        if logger and additional_found > 0:
-            logger(f"Найдено дополнительно {additional_found} точек")
+                        logger(f"  Добавлена удаленная ячейка {cell_key} (расстояние: {distance:.4f}°): {len(cell_to_points[cell_key])} точек")
+    
+    if logger:
+        logger(f"Создан кластер: {len(cluster_cells)} ячеек, {len(cluster_points)} точек")
     
     return cluster_cells, cluster_points[:target_points] if cluster_points else []
 
@@ -4623,6 +4671,7 @@ if st.sidebar.checkbox("🧪 Тест алгоритма кластеризац�
 # ==============================================
 # КОНЕЦ ((удалить после реализации))
 # ==============================================
+
 
 
 
