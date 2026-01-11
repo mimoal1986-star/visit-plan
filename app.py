@@ -440,28 +440,29 @@ def find_additional_cells(grid, used_cells, polygon_coords, needed_points):
 
 def build_simple_cluster(start_cell_key, target_points, grid, cell_to_points, used_cells, polygon_coords, logger=None):
     """
-    Строит простой кластер, начиная с заданной ячейки.
-    Алгоритм BFS (поиск в ширину) от стартовой ячейки.
+    Фикс: ограничиваем максимальный размер кластера.
+    Вместо 900+ ячеек для 10 точек.
     """
     if start_cell_key in used_cells:
         if logger:
-            logger(f"Стартовая ячейка {start_cell_key} уже использована")
+            logger(f"Ячейка {start_cell_key} уже использована")
         return [], []
     
     if start_cell_key not in grid.get('cell_index', {}):
         if logger:
-            logger(f"Стартовая ячейка {start_cell_key} не существует в сетке")
+            logger(f"Ячейка {start_cell_key} не существует в сетке")
         return [], []
     
     cluster_cells = []
     cluster_points = []
-    
-    # Очередь для BFS
     queue = [start_cell_key]
     visited = set([start_cell_key])
     
-    while queue and len(cluster_points) < target_points:
-        # Берем следующую ячейку из очереди
+    # ОГРАНИЧЕНИЕ: максимум в 3 раза больше ячеек чем нужно точек
+    # Было: 207 ячеек для 10 точек → станет: максимум 30 ячеек
+    MAX_CLUSTER_SIZE = max(target_points * 3, 10)  # Минимум 10 ячеек
+    
+    while queue and len(cluster_cells) < MAX_CLUSTER_SIZE and len(cluster_points) < target_points:
         cell_key = queue.pop(0)
         
         if cell_key in used_cells:
@@ -471,18 +472,19 @@ def build_simple_cluster(start_cell_key, target_points, grid, cell_to_points, us
         cluster_cells.append(cell_key)
         used_cells.add(cell_key)
         
-        # Добавляем точки из этой ячейки
+        # Добавляем точки из этой ячейки (если есть)
         if cell_key in cell_to_points:
             cluster_points.extend(cell_to_points[cell_key])
+            if logger and cell_to_points[cell_key]:
+                logger(f"  Ячейка {cell_key}: {len(cell_to_points[cell_key])} точек")
         
-        # Если набрали достаточно точек - останавливаемся
+        # Если набрали достаточно точек - можно остановиться раньше
         if len(cluster_points) >= target_points:
             break
         
-        # Добавляем соседей этой ячейки в очередь (BFS)
+        # Добавляем соседей (BFS)
         neighbors = get_cell_neighbors_4(cell_key)
         for neighbor_key in neighbors:
-            # Проверяем что сосед существует, не использован и не посещен
             if (neighbor_key in grid['cell_index'] and 
                 neighbor_key not in used_cells and
                 neighbor_key not in visited):
@@ -493,28 +495,40 @@ def build_simple_cluster(start_cell_key, target_points, grid, cell_to_points, us
                     queue.append(neighbor_key)
                     visited.add(neighbor_key)
     
-    # Если не набрали достаточно точек, ищем дополнительные ячейки
-    if len(cluster_points) < target_points:
-        needed = target_points - len(cluster_points)
-        additional_cells = find_additional_cells(grid, used_cells, polygon_coords, needed)
-        
-        for cell_key in additional_cells:
-            if cell_key in used_cells:
-                continue
-            
-            cluster_cells.append(cell_key)
-            used_cells.add(cell_key)
-            
-            if cell_key in cell_to_points:
-                cluster_points.extend(cell_to_points[cell_key])
-            
-            if len(cluster_points) >= target_points:
-                break
-    
     if logger:
         logger(f"Создан кластер: {len(cluster_cells)} ячеек, {len(cluster_points)} точек")
     
-    # Обрезаем если перебор (берем ровно target_points)
+    # Если не набрали достаточно точек, ищем дополнительные ячейки С ТОЧКАМИ
+    if len(cluster_points) < target_points:
+        needed = target_points - len(cluster_points)
+        if logger:
+            logger(f"Не хватает {needed} точек, ищем дополнительные ячейки...")
+        
+        # Ищем ближайшие ячейки с точками
+        additional_found = 0
+        for cell_key in grid['cell_index']:
+            if cell_key in used_cells:
+                continue
+            
+            # Берем только ячейки с точками
+            if cell_key in cell_to_points and cell_to_points[cell_key]:
+                # Проверяем что ячейка внутри полигона
+                cell = grid['cell_index'][cell_key]
+                if is_point_in_polygon(cell['center'], polygon_coords):
+                    cluster_cells.append(cell_key)
+                    cluster_points.extend(cell_to_points[cell_key])
+                    used_cells.add(cell_key)
+                    additional_found += len(cell_to_points[cell_key])
+                    
+                    if logger:
+                        logger(f"  Добавлена ячейка {cell_key}: {len(cell_to_points[cell_key])} точек")
+                    
+                    if len(cluster_points) >= target_points:
+                        break
+        
+        if logger and additional_found > 0:
+            logger(f"Найдено дополнительно {additional_found} точек")
+    
     return cluster_cells, cluster_points[:target_points] if cluster_points else []
 
 def cluster_from_perimeter_to_center_simple(polygon_coords, grid, cell_to_points, weekly_targets, logger=None):
@@ -4609,6 +4623,7 @@ if st.sidebar.checkbox("🧪 Тест алгоритма кластеризац�
 # ==============================================
 # КОНЕЦ ((удалить после реализации))
 # ==============================================
+
 
 
 
