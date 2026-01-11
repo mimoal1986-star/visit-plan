@@ -1,11 +1,7 @@
-# Картография
-try:
-    import folium
-    from streamlit_folium import folium_static
-    FOLIUM_AVAILABLE = True
-except ImportError:
-    FOLIUM_AVAILABLE = False
-    # st.sidebar.warning("⚠️ Для карты установите: pip install folium streamlit-folium")
+# Сначала ВСЕ импорты из стандартной библиотеки
+from functools import lru_cache 
+
+# Потом сторонние библиотеки
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -24,7 +20,7 @@ import plotly.express as px
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
-# ГЕОМЕТРИЯ - всегда используем упрощенную версию
+# ГЕОМЕТРИЯ - используем SciPy если доступен, иначе упрощенную версию
 SCIPY_AVAILABLE = False
 try:
     # Пробуем импортировать scipy
@@ -82,6 +78,212 @@ if 'plan_partial' not in st.session_state:
     st.session_state.plan_partial = False
 
 # ==============================================
+# ГЕОМЕТРИЧЕСКИЕ ФУНКЦИИ ДЛЯ СЕТКИ И ПОЛИГОНОВ (ИСПРАВЛЕННАЯ)
+# ==============================================
+
+from functools import lru_cache
+
+@lru_cache(maxsize=10000)
+def is_point_in_polygon_cached(point_tuple, polygon_tuple):
+    """
+    Кэшированная проверка точки внутри полигона.
+    """
+    if not polygon_tuple or len(polygon_tuple) < 3:
+        return False
+    
+    x, y = point_tuple
+    inside = False
+    n = len(polygon_tuple)
+    
+    for i in range(n):
+        x1, y1 = polygon_tuple[i]
+        x2, y2 = polygon_tuple[(i + 1) % n]
+        
+        if ((y1 > y) != (y2 > y)) and \
+           (x < (x2 - x1) * (y - y1) / (y2 - y1) + x1):
+            inside = not inside
+    
+    return inside
+
+def is_point_in_polygon(point, polygon):
+    """
+    Обертка для кэшированной функции.
+    """
+    if not polygon or len(polygon) < 3:
+        return False
+    
+    # Преобразуем в кортежи для кэширования
+    try:
+        point_tuple = (float(point[0]), float(point[1]))
+        # Убедимся что polygon - список кортежей
+        polygon_tuple = tuple((float(p[0]), float(p[1])) for p in polygon)
+        return is_point_in_polygon_cached(point_tuple, polygon_tuple)
+    except (ValueError, TypeError, IndexError):
+        return False
+
+def is_cell_in_polygon(cell_lat, cell_lon, grid_size, polygon_coords):
+    """
+    Проверяет что хотя бы часть ячейки внутри полигона.
+    """
+    # Проверяем 5 точек: 4 угла + центр
+    test_points = [
+        (cell_lat, cell_lon),  # левый нижний
+        (cell_lat + grid_size, cell_lon),  # левый верхний
+        (cell_lat, cell_lon + grid_size),  # правый нижний
+        (cell_lat + grid_size, cell_lon + grid_size),  # правый верхний
+        (cell_lat + grid_size/2, cell_lon + grid_size/2)  # центр
+    ]
+    
+    for point in test_points:
+        if is_point_in_polygon(point, polygon_coords):
+            return True
+    return False
+
+def create_grid_inside_polygon(polygon_coords, grid_size=0.0009):
+    """
+    Создает сетку ячеек внутри полигона.
+    """
+    if not polygon_coords or len(polygon_coords) < 3:
+        return None
+    
+    try:
+        # Bounding box полигона
+        lats = [float(p[0]) for p in polygon_coords]
+        lons = [float(p[1]) for p in polygon_coords]
+        
+        min_lat, max_lat = min(lats), max(lats)
+        min_lon, max_lon = min(lons), max(lons)
+        
+        # Добавляем небольшой запас
+        eps = grid_size * 0.1
+        min_lat -= eps
+        max_lat += eps
+        min_lon -= eps
+        max_lon += eps
+        
+        # Начальные координаты сетки
+        start_lat = math.floor(min_lat / grid_size) * grid_size
+        start_lon = math.floor(min_lon / grid_size) * grid_size
+        
+        # Рассчитываем размеры сетки
+        width_cells = int(math.ceil((max_lon - start_lon) / grid_size))
+        height_cells = int(math.ceil((max_lat - start_lat) / grid_size))
+        
+        cells = []
+        cell_index = {}  # Для быстрого поиска
+        
+        # Создаем все возможные ячейки в bounding box
+        for i in range(height_cells):
+            for j in range(width_cells):
+                cell_lat = start_lat + i * grid_size
+                cell_lon = start_lon + j * grid_size
+                
+                # Проверяем, что ячейка хотя бы частично внутри полигона
+                if is_cell_in_polygon(cell_lat, cell_lon, grid_size, polygon_coords):
+                    cell_data = {
+                        'grid_x': i,
+                        'grid_y': j,
+                        'center': (cell_lat + grid_size/2, cell_lon + grid_size/2),
+                        'lat': cell_lat,
+                        'lon': cell_lon,
+                        'lat_end': cell_lat + grid_size,
+                        'lon_end': cell_lon + grid_size
+                    }
+                    cells.append(cell_data)
+                    
+                    # Добавляем в индекс
+                    cell_key = f"{i}_{j}"
+                    cell_index[cell_key] = cell_data
+        
+        if not cells:
+            return None
+        
+        return {
+            'bbox': (min_lat, max_lat, min_lon, max_lon),
+            'grid_size': grid_size,
+            'cells': cells,
+            'cell_index': cell_index,  # Быстрый поиск
+            'width': width_cells,
+            'height': height_cells,
+            'start_lat': start_lat,
+            'start_lon': start_lon
+        }
+        
+    except Exception as e:
+        print(f"Ошибка при создании сетки: {e}")
+        return None
+
+def assign_points_to_grid_cells(points_coords, point_ids, grid):
+    """
+    Распределяет точки по ячейкам сетки.
+    """
+    if not grid or not points_coords or not point_ids:
+        return {}
+    
+    if len(points_coords) != len(point_ids):
+        print(f"Предупреждение: {len(points_coords)} координат != {len(point_ids)} ID")
+        return {}
+    
+    cell_to_points = {}
+    grid_size = grid['grid_size']
+    start_lat = grid['start_lat']
+    start_lon = grid['start_lon']
+    cell_index = grid.get('cell_index', {})
+    
+    for i, (point_coord, point_id) in enumerate(zip(points_coords, point_ids)):
+        try:
+            lat, lon = float(point_coord[0]), float(point_coord[1])
+            
+            # Определяем ячейку
+            grid_x = int((lat - start_lat) / grid_size)
+            grid_y = int((lon - start_lon) / grid_size)
+            
+            cell_key = f"{grid_x}_{grid_y}"
+            
+            # Проверяем, что ячейка существует в сетке
+            if cell_key in cell_index:
+                if cell_key not in cell_to_points:
+                    cell_to_points[cell_key] = []
+                cell_to_points[cell_key].append(point_id)
+            else:
+                # Точка вне сетки (на границе или ошибка)
+                print(f"Точка {point_id} вне сетки: {lat}, {lon}")
+                
+        except (ValueError, TypeError, IndexError) as e:
+            print(f"Пропущена точка {i}: {e}")
+            continue
+    
+    return cell_to_points
+
+def get_cell_neighbors(cell_key, grid):
+    """
+    Возвращает 4 соседа ячейки (север, юг, восток, запад).
+    Проверяет существование соседей.
+    """
+    try:
+        grid_x, grid_y = map(int, cell_key.split('_'))
+        cell_index = grid.get('cell_index', {})
+        
+        neighbor_keys = [
+            f"{grid_x}_{grid_y + 1}",  # север
+            f"{grid_x}_{grid_y - 1}",  # юг
+            f"{grid_x + 1}_{grid_y}",  # восток
+            f"{grid_x - 1}_{grid_y}",  # запад
+        ]
+        
+        # Возвращаем только существующих соседей
+        valid_neighbors = []
+        for key in neighbor_keys:
+            if key in cell_index:
+                valid_neighbors.append(key)
+        
+        return valid_neighbors
+        
+    except Exception as e:
+        print(f"Ошибка при поиске соседей ячейки {cell_key}: {e}")
+        return []
+
+# ==============================================
 # БОКОВАЯ ПАНЕЛЬ - НАСТРОЙКИ
 # ==============================================
 
@@ -126,6 +328,7 @@ with st.sidebar:
         value=False,
         help="Разбивает полигоны аудиторов на компактные недельные области с балансировкой ±3 точки"
     )
+
 
 # ==============================================
 # ФУНКЦИИ ДЛЯ СОЗДАНИЯ ШАБЛОНОВ
@@ -3922,8 +4125,73 @@ if st.session_state.plan_calculated:
         st.caption(f"📊 Данные: {len(st.session_state.points_df) if st.session_state.points_df is not None else 0} точек, "
                   f"{len(st.session_state.polygons) if st.session_state.polygons else 0} полигонов, "
                   f"{len(st.session_state.auditors_df) if st.session_state.auditors_df is not None else 0} аудиторов")
+
+
+    # ==============================================
+# ТЕСТОВАЯ СЕКЦИЯ ДЛЯ ЭТАПА 1 (удалить после реализации)
+# ==============================================
+
+if st.sidebar.checkbox("🧪 Тест геометрических функций", False, key="test_geo_functions"):
+    st.sidebar.markdown("---")
+    st.sidebar.subheader("Тест новых функций")
+    
+    # Тестовый полигон (квадрат Москва)
+    test_polygon = [
+        [55.5, 37.3],
+        [55.5, 37.8],
+        [55.8, 37.8],
+        [55.8, 37.3],
+        [55.5, 37.3]
+    ]
+    
+    # Тестовые точки
+    test_point_inside = (55.65, 37.55)
+    test_point_outside = (55.4, 37.55)
+    
+    col1, col2 = st.sidebar.columns(2)
+    
+    with col1:
+        inside = is_point_in_polygon(test_point_inside, test_polygon)
+        st.sidebar.write(f"📍 (55.65, 37.55)")
+        st.sidebar.write(f"Внутри: **{'✅ Да' if inside else '❌ Нет'}**")
+    
+    with col2:
+        outside = is_point_in_polygon(test_point_outside, test_polygon)
+        st.sidebar.write(f"📍 (55.4, 37.55)")
+        st.sidebar.write(f"Внутри: **{'❌ Да' if outside else '✅ Нет'}**")
+    
+    # Тест сетки
+    st.sidebar.markdown("---")
+    
+    if st.sidebar.button("Создать тестовую сетку", key="test_grid_btn"):
+        grid = create_grid_inside_polygon(test_polygon, grid_size=0.05)
+        
+        if grid:
+            st.sidebar.success(f"✅ Создана сетка: {len(grid['cells'])} ячеек")
+            st.sidebar.write(f"📐 Размер: {grid['width']}x{grid['height']}")
+            
+            # Тест распределения точек
+            test_points = [
+                [55.65, 37.55],
+                [55.75, 37.65],
+                [55.55, 37.35],
+            ]
+            test_ids = ["P001", "P002", "P003"]
+            
+            assignment = assign_points_to_grid_cells(test_points, test_ids, grid)
+            
+            st.sidebar.write("📊 Распределение точек:")
+            for cell_key, points in assignment.items():
+                st.sidebar.write(f"Ячейка {cell_key}: {points}")
+        else:
+            st.sidebar.error("❌ Не удалось создать сетку")
+
+# ==============================================
+# КОНЕЦ ((удалить после реализации))
+# ==============================================
     
     current_tab += 1
+
 
 
 
