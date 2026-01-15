@@ -21,7 +21,7 @@ import streamlit as st
 
 # === SET_PAGE_CONFIG (ВТОРОЙ, сразу после импорта streamlit!) ===
 st.set_page_config(
-    page_title="Калькулятор плана визитов тест",
+    page_title="Калькулятор плана визитов",
     page_icon="📊",
     layout="wide"
 )
@@ -3814,6 +3814,7 @@ if st.session_state.plan_calculated:
                   f"{len(st.session_state.polygons) if st.session_state.polygons else 0} полигонов, "
                   f"{len(st.session_state.auditors_df) if st.session_state.auditors_df is not None else 0} аудиторов")
     current_tab += 1
+
 
 
 
