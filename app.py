@@ -19,13 +19,6 @@ from plotly.subplots import make_subplots
 # === ИМПОРТ STREAMLIT (первый!) ===
 import streamlit as st
 
-# === SET_PAGE_CONFIG (ВТОРОЙ, сразу после импорта streamlit!) ===
-st.set_page_config(
-    page_title="Калькулятор плана визитов",
-    page_icon="📊",
-    layout="wide"
-)
-
 # === ТЕПЕРЬ остальные импорты ===
 # Картография
 try:
@@ -84,7 +77,7 @@ if 'data_loaded' not in st.session_state:
 if 'plan_partial' not in st.session_state:
     st.session_state.plan_partial = False
 
-st.title("📊 Калькулятор плана визитов по сотрудникам тест")
+st.title("📊 Калькулятор плана визитов по сотрудникам")
 st.markdown("---")
 
 # ==============================================
@@ -3814,6 +3807,7 @@ if st.session_state.plan_calculated:
                   f"{len(st.session_state.polygons) if st.session_state.polygons else 0} полигонов, "
                   f"{len(st.session_state.auditors_df) if st.session_state.auditors_df is not None else 0} аудиторов")
     current_tab += 1
+
 
 
 
