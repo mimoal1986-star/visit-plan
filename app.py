@@ -1934,64 +1934,118 @@ def create_geographic_daily_routes(points_df, weekly_clusters_df):
 # ФУНКЦИИ ДЛЯ РАСПРЕДЕЛЕНИЯ ПО АУДИТОРАМ (ГЕОГРАФИЧЕСКОЕ РАЗДЕЛЕНИЕ)
 # ==============================================
 
+def split_into_sectors(points_df, n_sectors):
+    """
+    Делит точки на угловые сектора от географического центра.
+    Используется для круглых городов.
+    
+    Args:
+        points_df: DataFrame с точками (должны быть колонки 'Широта', 'Долгота')
+        n_sectors: количество секторов
+    
+    Returns:
+        list of DataFrames — список групп точек по секторам
+    """
+    if len(points_df) == 0 or n_sectors <= 0:
+        return []
+    
+    # 1. Находим географический центр (среднее по координатам)
+    center_lat = points_df['Широта'].mean()
+    center_lon = points_df['Долгота'].mean()
+    
+    # 2. Вычисляем азимут (угол от центра) для каждой точки
+    def calculate_bearing(lat, lon):
+        """Вычисляет угол от центра (в градусах, 0-360)"""
+        delta_lon = lon - center_lon
+        delta_lat = lat - center_lat
+        
+        # Вычисляем угол в радианах
+        angle = math.atan2(delta_lon, delta_lat)
+        # Переводим в градусы (0-360)
+        bearing = math.degrees(angle)
+        if bearing < 0:
+            bearing += 360
+        return bearing
+    
+    points_df_copy = points_df.copy()
+    points_df_copy['азимут'] = points_df_copy.apply(
+        lambda row: calculate_bearing(row['Широта'], row['Долгота']), 
+        axis=1
+    )
+    
+    # 3. Сортируем по азимуту
+    points_df_copy = points_df_copy.sort_values('азимут').reset_index(drop=True)
+    
+    # 4. Делим на равные сектора (равное количество точек, а не равные углы)
+    sector_size = len(points_df_copy) // n_sectors
+    remainder = len(points_df_copy) % n_sectors
+    
+    sectors = []
+    start_idx = 0
+    
+    for i in range(n_sectors):
+        size = sector_size + (1 if i < remainder else 0)
+        end_idx = start_idx + size
+        
+        if start_idx < len(points_df_copy):
+            sector = points_df_copy.iloc[start_idx:end_idx].copy()
+            sector = sector.drop(columns=['азимут'])
+            sectors.append(sector)
+        else:
+            sectors.append(pd.DataFrame(columns=points_df.columns))
+        
+        start_idx = end_idx
+    
+    return sectors
+
+
 def divide_points_by_direction(points_df, n_auditors, city):
     """
     Разделяет точки на географические полигоны с равным распределением
+    
+    - 1 аудитор: весь город
+    - 2 аудитора: Север/Юг
+    - 3 аудитора: Север + Юго-Восток + Юго-Запад
+    - 4 аудитора: 4 квадранта
+    - 5+ аудиторов: 
+        * вытянутый город → полосы поперек длинной стороны
+        * круглый город → угловые сектора от центра
     """
+    
+    # ========== 1. Базовые случаи (оставляем как есть) ==========
     if n_auditors == 1:
         return [points_df]
     
-    if n_auditors <= 0 or points_df.empty:
-        return []
-    
-    points_df = points_df.copy().reset_index(drop=True)
-    
-    # Для воспроизводимости сортируем по ID
-    points_df = points_df.sort_values('ID_Точки').reset_index(drop=True)
-    
-    if n_auditors == 2:
+    elif n_auditors == 2:
         # Север-Юг: сортируем по широте, делим пополам
         points_sorted = points_df.sort_values('Широта', ascending=False).reset_index(drop=True)
         split_idx = len(points_sorted) // 2
-        
-        north = points_sorted.iloc[:split_idx].copy()  # Север (более высокие широты)
-        south = points_sorted.iloc[split_idx:].copy()  # Юг
-        
+        north = points_sorted.iloc[:split_idx].copy()
+        south = points_sorted.iloc[split_idx:].copy()
         return [north, south]
     
     elif n_auditors == 3:
-        # Север-Юго-Восток-Юго-Запад
-        # Сначала находим самые северные точки для "Севера"
+        # Север + Юго-Восток + Юго-Запад
         points_sorted = points_df.sort_values('Широта', ascending=False).reset_index(drop=True)
-        
-        # 1/3 самых северных точек = Север
         north_size = len(points_sorted) // 3
         north = points_sorted.iloc[:north_size].copy()
-        
-        # Остальные точки = Юг
         south_points = points_sorted.iloc[north_size:].copy()
         
-        # Делим южные точки на Восток и Запад по долготе
         if not south_points.empty:
-            # Сортируем южные точки по долготе
             south_sorted = south_points.sort_values('Долгота').reset_index(drop=True)
-            
-            # Медианная долгота для разделения
             median_lon = south_sorted['Долгота'].median()
             
             southeast = south_sorted[south_sorted['Долгота'] >= median_lon].copy()
             southwest = south_sorted[south_sorted['Долгота'] < median_lon].copy()
             
-            # Балансируем размеры ЮВ и ЮЗ
+            # Балансировка ЮВ и ЮЗ
             target_south_size = len(south_sorted) // 2
             if len(southeast) > target_south_size + 2:
-                # Перемещаем самые западные точки из ЮВ в ЮЗ
                 excess = len(southeast) - target_south_size
                 points_to_move = southeast.nsmallest(excess, 'Долгота')
                 southeast = southeast.drop(points_to_move.index)
                 southwest = pd.concat([southwest, points_to_move], ignore_index=True)
             elif len(southwest) > target_south_size + 2:
-                # Перемещаем самые восточные точки из ЮЗ в ЮВ
                 excess = len(southwest) - target_south_size
                 points_to_move = southwest.nlargest(excess, 'Долгота')
                 southwest = southwest.drop(points_to_move.index)
@@ -2002,28 +2056,59 @@ def divide_points_by_direction(points_df, n_auditors, city):
         return [north, pd.DataFrame(), pd.DataFrame()]
     
     elif n_auditors == 4:
-        # Север-Восток-Юг-Запад через квадранты
-        # Вычисляем медианные координаты
+        # 4 квадранта: Северо-Восток, Северо-Запад, Юго-Восток, Юго-Запад
         median_lat = points_df['Широта'].median()
         median_lon = points_df['Долгота'].median()
         
-        # Создаем квадранты
-        ne_mask = (points_df['Широта'] >= median_lat) & (points_df['Долгота'] >= median_lon)
-        nw_mask = (points_df['Широта'] >= median_lat) & (points_df['Долгота'] < median_lon)
-        se_mask = (points_df['Широта'] < median_lat) & (points_df['Долгота'] >= median_lon)
-        sw_mask = (points_df['Широта'] < median_lat) & (points_df['Долгота'] < median_lon)
+        ne = points_df[(points_df['Широта'] >= median_lat) & (points_df['Долгота'] >= median_lon)].copy()
+        nw = points_df[(points_df['Широта'] >= median_lat) & (points_df['Долгота'] < median_lon)].copy()
+        se = points_df[(points_df['Широта'] < median_lat) & (points_df['Долгота'] >= median_lon)].copy()
+        sw = points_df[(points_df['Широта'] < median_lat) & (points_df['Долгота'] < median_lon)].copy()
         
-        ne_points = points_df[ne_mask].copy()  # Северо-Восток → Север
-        nw_points = points_df[nw_mask].copy()  # Северо-Запад → Запад
-        se_points = points_df[se_mask].copy()  # Юго-Восток → Восток
-        sw_points = points_df[sw_mask].copy()  # Юго-Запад → Юг
-        
-        # Возвращаем в порядке: Север, Восток, Юг, Запад
-        return [ne_points, se_points, sw_points, nw_points]
+        return [ne, se, sw, nw]
     
+    # ========== 2. НОВАЯ ЛОГИКА ДЛЯ 5+ АУДИТОРОВ ==========
     else:
-        # Для другого количества - простое равное деление
-        return np.array_split(points_df, n_auditors)
+        # Защита от пустых данных
+        if points_df.empty:
+            return [pd.DataFrame(columns=points_df.columns) for _ in range(n_auditors)]
+        
+        # 2.1. Определяем форму города
+        lats = points_df['Широта'].values
+        lons = points_df['Долгота'].values
+        
+        lat_range = lats.max() - lats.min()
+        lon_range = lons.max() - lons.min()
+        
+        # Избегаем деления на ноль
+        if min(lat_range, lon_range) < 0.0001:
+            # Город почти точка — используем простое деление
+            return np.array_split(points_df, n_auditors)
+        
+        ratio = max(lat_range, lon_range) / min(lat_range, lon_range)
+        
+        # 2.2. Выбираем стратегию в зависимости от формы города
+        if ratio > 1.5:
+            # ВЫТЯНУТЫЙ ГОРОД — режем полосами поперек длинной стороны
+            if lat_range > lon_range:
+                # Вытянут по широте (север-юг) → режем по широте на полосы
+                points_sorted = points_df.sort_values('Широта', ascending=False).reset_index(drop=True)
+            else:
+                # Вытянут по долготе (запад-восток) → режем по долготе на полосы
+                points_sorted = points_df.sort_values('Долгота', ascending=True).reset_index(drop=True)
+            
+            # Делим на N равных частей (по количеству точек)
+            return np.array_split(points_sorted, n_auditors)
+        
+        else:
+            # КРУГЛЫЙ ГОРОД — режем на угловые сектора от центра
+            sectors = split_into_sectors(points_df, n_auditors)
+            
+            # Если сектора получились пустыми — fallback к простому делению
+            if not sectors or all(s.empty for s in sectors):
+                return np.array_split(points_df, n_auditors)
+            
+            return sectors
 
 
 def balance_point_groups_final(groups, n_auditors):
