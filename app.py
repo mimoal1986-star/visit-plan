@@ -3692,7 +3692,7 @@ if st.session_state.plan_calculated:
                     st.markdown("---")
                     
                     # КОЛОНКА 1: Excel для Google Карт
-                    with st.container(border=True):
+                    with st.container():
                         st.markdown("### 📊 Excel для Google Карт")
                         st.caption("Формат для импорта в Google Карты / My Maps")
                         
@@ -3733,7 +3733,7 @@ if st.session_state.plan_calculated:
                                         st.error(f"❌ Ошибка создания Excel: {str(e)}")
                     
                     # КОЛОНКА 2: KML для Google Earth
-                    with st.container(border=True):
+                    with st.container():
                         st.markdown("### 🗺️ KML для Google Earth")
                         st.caption("Географический формат для GIS-систем")
                         
@@ -3773,7 +3773,7 @@ if st.session_state.plan_calculated:
                                         st.error(f"❌ Ошибка создания KML: {str(e)}")
                     
                     # КОЛОНКА 3: Полный отчет Excel
-                    with st.container(border=True):
+                    with st.container():
                         st.markdown("### 📋 Полный отчет Excel")
                         st.caption("Все данные приложения в одном файле")
                         
